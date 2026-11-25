@@ -11,6 +11,24 @@ export interface Actions {
   removeReply(id: string, rid: string): Promise<void>;
 }
 
+const copy = (text: string) => { navigator.clipboard?.writeText(text).catch(() => {}); };
+// Repo id is base64url(repo root path); the path is the human-usable repo ref.
+const repoRef = () => {
+  const id = /^\/repositories\/([^/]+)/.exec(location.pathname)?.[1] ?? '';
+  try {
+    const b = atob(id.replace(/-/g, '+').replace(/_/g, '/'));
+    const path = new TextDecoder().decode(Uint8Array.from(b, (c) => c.charCodeAt(0)));
+    return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replace(/'/g, `'\\''`)}'`;
+  } catch { return id; }
+};
+const threadUrl = (d: Discussion) => {
+  const u = new URL(location.href);
+  u.search = ''; u.hash = '';
+  u.searchParams.set('file', d.path);
+  u.hash = `discussion-${d.id}`;
+  return u.toString();
+};
+
 const when = (s: string) => new Date(s).toLocaleString();
 
 export function CommentForm({ initial = '', submitLabel, onSubmit, onCancel, autoFocus = true }: {
@@ -49,14 +67,14 @@ export function Thread({ d, actions, showPath }: { d: Discussion; actions: Actio
   const run = async (fn: () => Promise<void>) => { setError(''); try { await fn(); } catch (e: any) { setError(e.message); } };
   const lines = d.startLine === d.endLine ? `line ${d.startLine}` : `lines ${d.startLine}–${d.endLine}`;
   return (
-    <div className={`thread${d.resolved ? ' resolved' : ''}${d.outdated ? ' outdated' : ''}`}>
-      <div className="thread-head">
+    <div id={`discussion-${d.id}`} className={`thread${d.resolved ? ' resolved' : ''}${d.outdated ? ' outdated' : ''}`}>
+      {(showPath || d.outdated || d.resolved) && <div className="thread-head">
         {showPath && <span className="thread-path">{d.path}</span>}
-        <span className="muted">{lines}</span>
+        {showPath && <span className="muted">{lines}</span>}
         {d.outdated && <span className="badge warn" title="The commented code changed or was removed">Outdated</span>}
         {d.resolved && <span className="badge ok">Resolved</span>}
         {d.resolved && <button className="btn small spacer-left" onClick={() => setCollapsed(!collapsed)}>{collapsed ? 'Expand' : 'Collapse'}</button>}
-      </div>
+      </div>}
       {collapsed && <div className="muted small thread-preview">{d.author}: {d.body.split('\n')[0].slice(0, 120)}</div>}
       {!collapsed && <>
       {(d.outdated || showPath) && d.anchor.lines.length > 0 && (
@@ -67,6 +85,10 @@ export function Thread({ d, actions, showPath }: { d: Discussion; actions: Actio
         onEdit={() => setEditing('root')} onCancel={() => setEditing(null)}
         onSave={async (b) => { await actions.update(d.id, { body: b }); setEditing(null); }}
         onDelete={() => { if (confirm('Delete this discussion and all its replies?')) run(() => actions.remove(d.id)); }}
+        extra={<>
+          <CopyButton label="Copy URL" title="Copy link to this thread" text={() => threadUrl(d)} />
+          <CopyButton label="Copy cmd" title="Copy review command for this comment" text={() => `review ${repoRef()} list-comment ${d.id}`} />
+        </>}
       />
       {d.replies.map((r) => (
         <Entry
@@ -94,8 +116,13 @@ export function Thread({ d, actions, showPath }: { d: Discussion; actions: Actio
   );
 }
 
-function Entry({ author, time, body, reply, editing, onEdit, onCancel, onSave, onDelete }: {
-  author: string; time: string; body: string; reply?: boolean; editing: boolean;
+function CopyButton({ label, title, text }: { label: string; title: string; text: () => string }) {
+  const [done, setDone] = useState(false);
+  return <button className="copy-btn" title={title} onClick={() => { copy(text()); setDone(true); setTimeout(() => setDone(false), 1200); }}>{done ? 'Copied' : label}</button>;
+}
+
+function Entry({ extra, author, time, body, reply, editing, onEdit, onCancel, onSave, onDelete }: {
+  extra?: React.ReactNode; author: string; time: string; body: string; reply?: boolean; editing: boolean;
   onEdit(): void; onCancel(): void; onSave(b: string): Promise<void>; onDelete(): void;
 }) {
   return (
@@ -104,6 +131,7 @@ function Entry({ author, time, body, reply, editing, onEdit, onCancel, onSave, o
         <strong>{author}</strong> <span className="muted">{when(time)}</span>
         {!editing && (
           <span className="entry-actions">
+            {extra}
             <button className="link" onClick={onEdit}>Edit</button>
             <button className="link danger" onClick={onDelete}>Delete</button>
           </span>
