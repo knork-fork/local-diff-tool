@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, listRepos, makeApi } from './api';
 import { DiffView } from './DiffView';
-import { DiscussionsDialog, ExportDialog, SettingsDialog, SubmitDialog } from './Dialogs';
+import { DiscussionsDialog, SettingsDialog } from './Dialogs';
 import { flatten, Sidebar, type ReviewFilter } from './Sidebar';
 import type { Actions } from './Thread';
 import type { Discussion, FileDiff, FileEntry, FilesResult, RepoInfo, Scope, Settings } from './types';
 
 const SCOPE_LABEL: Record<Scope, string> = {
-  unstaged: 'Unstaged + untracked', staged: 'Staged', all: 'All uncommitted + untracked', untracked: 'Untracked only',
+  all: 'All uncommitted', staged: 'Staged only', unstaged: 'Unstaged only',
 };
 
 function useTheme() {
@@ -51,11 +51,10 @@ function RepoPage({ id }: { id: string }) {
   const [filter, setFilter] = useState<ReviewFilter>('all');
   const [query, setQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
-  const [dialog, setDialog] = useState<null | 'export' | 'submit' | 'settings' | 'discussions'>(null);
-  const [exportReview, setExportReview] = useState<string | undefined>();
+  const [dialog, setDialog] = useState<null | 'settings' | 'discussions'>(null);
   const [busy, setBusy] = useState(false);
 
-  const scope = settings?.scope ?? 'unstaged';
+  const scope = settings?.scope ?? 'all';
 
   const loadFiles = useCallback(async (s: Scope) => {
     const [f, d] = await Promise.all([api.files(s), api.discussions()]);
@@ -164,7 +163,6 @@ function RepoPage({ id }: { id: string }) {
   if (error) return <div className="home"><h2>Cannot open repository</h2><p className="error">{error}</p><p>Run <code>review</code> in the repository again.</p></div>;
   if (!data || !info || !settings) return <div className="home muted">Loading…</div>;
 
-  const pending = discussions.filter((d) => !d.reviewId && !d.resolved).length;
   const t = data.totals;
   const fileDiscussions = discussions.filter((d) => d.path === selected);
 
@@ -189,8 +187,6 @@ function RepoPage({ id }: { id: string }) {
           </div>
           <button className="btn" disabled={busy} onClick={refresh}>↻ Refresh</button>
           <button className="btn" onClick={() => setDialog('discussions')}>Discussions ({t.totalDiscussions})</button>
-          <button className="btn" onClick={() => { setExportReview(undefined); setDialog('export'); }}>Export</button>
-          <button className="btn primary" onClick={() => setDialog('submit')}>Submit review{pending ? ` (${pending})` : ''}</button>
           <button className="btn" onClick={() => setDialog('settings')} title="Settings">⚙</button>
         </div>
         {notice && <div className="notice" onClick={() => setNotice('')}>{notice} <span className="muted">(click to dismiss)</span></div>}
@@ -213,7 +209,7 @@ function RepoPage({ id }: { id: string }) {
                   <button className="btn small" onClick={() => goto(1)}>Next →</button>
                   <button className="btn small" onClick={nextUnreviewed}>Next unreviewed ⇥</button>
                   <button className={`btn small${showAll ? ' on' : ''}`} onClick={() => setShowAll(!showAll)}>{showAll ? 'Collapse unchanged' : 'Show full file'}</button>
-                  <label className="reviewed-toggle"><input type="checkbox" checked={current.reviewed} onChange={() => toggleReviewed(current)} /> Viewed</label>
+                  <label className="reviewed-toggle"><input type="checkbox" checked={current.reviewed} onChange={() => toggleReviewed(current)} /> {current.reviewed ? 'Unreview' : 'Review'}</label>
                 </div>
               </div>
               {diffErr && <div className="error pad">{diffErr}</div>}
@@ -223,9 +219,6 @@ function RepoPage({ id }: { id: string }) {
           )}
         </main>
       </div>
-      {dialog === 'export' && <ExportDialog api={api} reviewId={exportReview} onClose={() => setDialog(null)} />}
-      {dialog === 'submit' && <SubmitDialog api={api} scope={scope} pending={pending} onClose={() => setDialog(null)}
-        onDone={(rid) => { reload(); setExportReview(rid); setDialog('export'); }} />}
       {dialog === 'settings' && <SettingsDialog theme={theme} setTheme={setTheme} contextLines={settings.contextLines} setContextLines={(n) => patchSettings({ contextLines: n })} onClose={() => setDialog(null)} />}
       {dialog === 'discussions' && <DiscussionsDialog discussions={discussions} actions={globalActions} onOpenFile={(p) => select(p)} onClose={() => setDialog(null)} />}
     </div>

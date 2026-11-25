@@ -1,4 +1,4 @@
-export type Scope = 'unstaged' | 'staged' | 'all' | 'untracked';
+export type Scope = 'unstaged' | 'staged' | 'all';
 export type Side = 'old' | 'new';
 export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
 export type ViewMode = 'unified' | 'split';
@@ -20,6 +20,6 @@ export interface FileDiff { path: string; oldPath: string | null; status: FileSt
 export interface Reply { id: string; body: string; author: string; createdAt: string; updatedAt: string }
 export interface Discussion {
   id: string; path: string; side: Side; startLine: number; endLine: number; body: string; author: string;
-  replies: Reply[]; resolved: boolean; outdated: boolean; reviewId: string | null; createdAt: string; updatedAt: string;
+  replies: Reply[]; resolved: boolean; outdated: boolean; createdAt: string; updatedAt: string;
   anchor: { lines: string[] };
 }

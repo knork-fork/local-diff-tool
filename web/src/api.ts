@@ -37,9 +37,6 @@ export const makeApi = (id: string) => {
     reply: (id: string, body: string) => req<Discussion>('POST', `${b}/discussions/${id}/replies`, { body }),
     updateReply: (id: string, rid: string, body: string) => req<Discussion>('PATCH', `${b}/discussions/${id}/replies/${rid}`, { body }),
     removeReply: (id: string, rid: string) => req<Discussion>('DELETE', `${b}/discussions/${id}/replies/${rid}`),
-    submit: (scope: Scope, summary: string) => req<{ id: string; discussionIds: string[] }>('POST', `${b}/reviews`, { scope, summary }),
-    export: (o: { format: 'json' | 'markdown'; include: string; unresolvedOnly: boolean; reviewId?: string }) =>
-      req<string>('GET', `${b}/export?${q({ format: o.format, include: o.include, unresolvedOnly: String(o.unresolvedOnly), reviewId: o.reviewId })}`, undefined, true),
   };
 };
 export type Api = ReturnType<typeof makeApi>;

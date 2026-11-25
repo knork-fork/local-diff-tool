@@ -78,11 +78,12 @@ describe('api', () => {
     await app.inject({ method: 'POST', url: `${base}/refresh`, headers: H, payload: {} });
     expect((await app.inject({ url: `${base}/discussions?outdated=true`, headers: H })).json().discussions).toHaveLength(1);
 
-    // submit + export
-    const sub = await app.inject({ method: 'POST', url: `${base}/reviews`, headers: H, payload: {} });
-    expect(sub.statusCode).toBe(201);
-    const md = await app.inject({ url: `${base}/export?format=markdown`, headers: H });
-    expect(md.body).toContain('## a.txt');
+    // review data is per branch: a different branch starts empty, and the original is intact when switching back
+    const orig = sh(dir, 'symbolic-ref', '--short', 'HEAD').trim();
+    sh(dir, 'symbolic-ref', 'HEAD', 'refs/heads/feature/x');
+    expect((await app.inject({ url: `${base}/discussions`, headers: H })).json().discussions).toHaveLength(0);
+    sh(dir, 'symbolic-ref', 'HEAD', `refs/heads/${orig}`);
+    expect((await app.inject({ url: `${base}/discussions`, headers: H })).json().discussions).toHaveLength(1);
 
     // staged scope + commit-less repo
     sh(dir, 'add', 'a.txt');
@@ -92,7 +93,8 @@ describe('api', () => {
 
     // malformed file is never overwritten
     const rf = fs.readdirSync(DATA).filter((n) => n.startsWith(path.basename(dir)))[0];
-    const file = path.join(DATA, rf, 'review.json');
+    const bdir = path.join(DATA, rf, 'branches');
+    const file = path.join(bdir, fs.readdirSync(bdir).find((n) => n.startsWith(orig))!, 'review.json');
     fs.writeFileSync(file, '{oops');
     const bad = await app.inject({ method: 'PUT', url: `${base}/files/reviewed`, headers: H, payload: { path: 'a.txt', reviewed: true } });
     expect(bad.statusCode).toBe(500);

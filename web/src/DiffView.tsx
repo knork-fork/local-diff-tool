@@ -89,7 +89,6 @@ export function DiffView({ diff, discussions, viewMode, contextLines, showAll, a
         {ds.map((d) => <Thread key={d.id} d={d} actions={actions} />)}
         {f && (
           <div className="thread new">
-            <div className="muted small">Commenting on {f.start === f.end ? `line ${f.start}` : `lines ${f.start}–${f.end}`} ({f.side} side)</div>
             <CommentForm submitLabel="Add comment to review" onCancel={() => setForm(null)}
               onSubmit={async (b) => { await actions.create(f.side, f.start, f.end, b); setForm(null); }} />
           </div>

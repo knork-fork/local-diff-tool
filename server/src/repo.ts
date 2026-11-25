@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { makeAnchor, relocate } from './anchor.js';
 import { parsePatch } from './diffparse.js';
-import { exportMarkdown } from './export.js';
 import { filePatch, listChanges, readSide, repoInfo } from './git.js';
 import { repoIdFor, safeRelPath } from './paths.js';
 import { ReviewStore } from './store.js';
@@ -12,7 +11,7 @@ const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const scopeKey = (branch: string, scope: Scope) => `${branch}::${scope}`;
 
-export function parseScope(v: unknown, fallback: Scope = 'unstaged'): Scope {
+export function parseScope(v: unknown, fallback: Scope = 'all'): Scope {
   if (v === undefined || v === '') return fallback;
   if (!SCOPES.includes(v as Scope)) throw new HttpError(400, 'invalid_scope', `scope must be one of ${SCOPES.join(', ')}`);
   return v as Scope;
@@ -24,14 +23,17 @@ const str = (v: unknown, name: string, max = 100_000): string => {
   return v;
 };
 
-export interface DiscussionFilter { file?: string; resolved?: boolean; outdated?: boolean; submitted?: boolean; branch?: string; reviewId?: string }
+export interface DiscussionFilter { file?: string; resolved?: boolean; outdated?: boolean }
 
 export class Repo {
   readonly id: string;
-  readonly store: ReviewStore;
   constructor(readonly root: string) {
     this.id = repoIdFor(root);
-    this.store = new ReviewStore(root);
+  }
+
+  /** Review data lives in one file per branch, so the store follows the currently checked-out branch. */
+  async store(): Promise<ReviewStore> {
+    return new ReviewStore(this.root, (await repoInfo(this.root)).branch);
   }
 
   async info() {
@@ -43,12 +45,12 @@ export class Repo {
   }
 
   async init() {
-    await this.store.ensureDir();
+    await (await this.store()).ensureDir();
     return this.info();
   }
 
   private async scopeFallback(): Promise<Scope> {
-    return (await this.store.read()).settings.scope;
+    return (await (await this.store()).read()).settings.scope;
   }
 
   async resolveScope(v: unknown) { return parseScope(v, await this.scopeFallback()); }
@@ -79,7 +81,7 @@ export class Repo {
   }
 
   async files(scope: Scope) {
-    const [{ branch }, files, data] = await Promise.all([repoInfo(this.root), listChanges(this.root, scope), this.store.read()]);
+    const [{ branch }, files, data] = await Promise.all([repoInfo(this.root), listChanges(this.root, scope), this.store().then((s) => s.read())]);
     return this.decorate(data, branch, scope, files);
   }
 
@@ -102,7 +104,7 @@ export class Repo {
     const files = await listChanges(this.root, scope);
     const oldPathOf = new Map(files.filter((f) => f.oldPath).map((f) => [f.path, f.oldPath!]));
     const report = { invalidated: [] as string[], outdated: [] as string[], relocated: [] as string[], reopened: [] as string[] };
-    const data = await this.store.mutate(async (d) => {
+    const data = await (await this.store()).mutate(async (d) => {
       const key = scopeKey(branch, scope);
       const reviewed = d.reviewedFiles[key] ?? {};
       const byPath = new Map(files.map((f) => [f.path, f]));
@@ -133,7 +135,7 @@ export class Repo {
     const files = await listChanges(this.root, scope);
     const f = files.find((x) => x.path === rel);
     if (!f) throw new HttpError(404, 'no_changes', `${rel} has no changes in scope ${scope}`);
-    await this.store.mutate((d) => {
+    await (await this.store()).mutate((d) => {
       const key = scopeKey(branch, scope);
       d.reviewedFiles[key] ??= {};
       if (reviewed) d.reviewedFiles[key][rel] = { fingerprint: f.fingerprint, reviewedAt: now() };
@@ -142,15 +144,10 @@ export class Repo {
     return this.files(scope);
   }
 
-  async reviewState(scope: Scope) {
-    const data = await this.store.read();
-    const f = await this.files(scope);
-    return { ...f, reviews: data.reviews, settings: data.settings, revision: data.revision };
-  }
-
   async settings(patch?: Partial<Settings>) {
-    if (!patch) return (await this.store.read()).settings;
-    return this.store.mutate((d) => {
+    const store = await this.store();
+    if (!patch) return (await store.read()).settings;
+    return store.mutate((d) => {
       if (patch.viewMode !== undefined) {
         if (patch.viewMode !== 'unified' && patch.viewMode !== 'split') throw new HttpError(400, 'invalid_body', 'invalid viewMode');
         d.settings.viewMode = patch.viewMode;
@@ -166,15 +163,11 @@ export class Repo {
 
   // ---- discussions ----
   async listDiscussions(f: DiscussionFilter = {}) {
-    const data = await this.store.read();
-    const branch = f.branch ?? (await repoInfo(this.root)).branch;
+    const data = await (await this.store()).read();
     return data.discussions.filter((d) =>
-      d.branch === branch &&
       (f.file === undefined || d.path === f.file) &&
       (f.resolved === undefined || d.resolved === f.resolved) &&
-      (f.outdated === undefined || d.outdated === f.outdated) &&
-      (f.submitted === undefined || (d.reviewId !== null) === f.submitted) &&
-      (f.reviewId === undefined || d.reviewId === f.reviewId));
+      (f.outdated === undefined || d.outdated === f.outdated));
   }
 
   async createDiscussion(b: any): Promise<Discussion> {
@@ -195,14 +188,14 @@ export class Repo {
       id: uid(), branch, scope, path: rel, side, startLine, endLine, originalStartLine: startLine, originalEndLine: endLine,
       anchor: makeAnchor(lines, startLine, endLine), fingerprint: f?.fingerprint ?? '', body,
       author: typeof b.author === 'string' && b.author ? b.author : 'You', replies: [],
-      resolved: false, resolvedAt: null, outdated: false, reviewId: null, createdAt: t, updatedAt: t,
+      resolved: false, resolvedAt: null, outdated: false, createdAt: t, updatedAt: t,
     };
-    await this.store.mutate((data) => { data.discussions.push(d); });
+    await (await this.store()).mutate((data) => { data.discussions.push(d); });
     return d;
   }
 
   private async withDiscussion<T>(id: string, fn: (d: Discussion, data: ReviewData) => T): Promise<T> {
-    return this.store.mutate((data) => {
+    return (await this.store()).mutate((data) => {
       const d = data.discussions.find((x) => x.id === id);
       if (!d) throw new HttpError(404, 'not_found', 'Discussion not found');
       const r = fn(d, data);
@@ -223,7 +216,7 @@ export class Repo {
   }
 
   async deleteDiscussion(id: string) {
-    await this.store.mutate((data) => {
+    await (await this.store()).mutate((data) => {
       const i = data.discussions.findIndex((x) => x.id === id);
       if (i < 0) throw new HttpError(404, 'not_found', 'Discussion not found');
       data.discussions.splice(i, 1);
@@ -256,33 +249,5 @@ export class Repo {
       d.replies.splice(i, 1);
       return { ...d };
     });
-  }
-
-  // ---- reviews ----
-  async submitReview(b: any) {
-    const scope = await this.resolveScope(b.scope);
-    const { branch } = await repoInfo(this.root);
-    const summary = typeof b.summary === 'string' ? b.summary : '';
-    return this.store.mutate((data) => {
-      const ids: string[] | undefined = Array.isArray(b.discussionIds) ? b.discussionIds : undefined;
-      const picked = data.discussions.filter((d) =>
-        d.branch === branch && d.reviewId === null && !d.resolved && (!ids || ids.includes(d.id)));
-      if (picked.length === 0 && !summary.trim()) throw new HttpError(400, 'nothing_to_submit', 'There are no pending unresolved discussions to submit');
-      const review = { id: uid(), branch, scope, summary, discussionIds: picked.map((d) => d.id), createdAt: now() };
-      for (const d of picked) d.reviewId = review.id;
-      data.reviews.push(review);
-      return review;
-    });
-  }
-
-  async export(q: { format: 'json' | 'markdown'; include?: string; reviewId?: string; unresolvedOnly?: boolean }) {
-    const info = await this.info();
-    let list = await this.listDiscussions({ reviewId: q.reviewId });
-    if (q.include === 'pending') list = list.filter((d) => d.reviewId === null);
-    else if (q.include === 'submitted') list = list.filter((d) => d.reviewId !== null);
-    if (q.unresolvedOnly) list = list.filter((d) => !d.resolved);
-    const meta = { name: info.name, branch: info.branch, scope: 'all', exportedAt: now() };
-    if (q.format === 'markdown') return { type: 'text/markdown; charset=utf-8', body: exportMarkdown(meta, list) };
-    return { type: 'application/json', body: { repository: { name: meta.name, branch: meta.branch, path: info.path }, exportedAt: meta.exportedAt, discussions: list } };
   }
 }

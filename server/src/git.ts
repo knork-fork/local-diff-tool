@@ -127,7 +127,7 @@ export async function listChanges(root: string, scope: Scope): Promise<ChangedFi
   const { hasHead } = await repoInfo(root);
   const base = hasHead ? 'HEAD' : EMPTY_TREE;
   const files: ChangedFile[] = [];
-  if (scope !== 'untracked') {
+  {
     const mode = trackedModeArgs(scope, base);
     const raw = parseRaw((await git(root, [...mode, ...DIFF_FLAGS, '--raw', '-z', '--abbrev=40'])).stdout);
     const patches = splitPatches((await git(root, [...mode, ...DIFF_FLAGS, '-U0'])).stdout.toString('utf8'));
@@ -157,7 +157,7 @@ export async function listChanges(root: string, scope: Scope): Promise<ChangedFi
 export async function filePatch(root: string, scope: Scope, rel: string, oldPath: string | null): Promise<{ patch: string; untracked: boolean } | null> {
   const { hasHead } = await repoInfo(root);
   const base = hasHead ? 'HEAD' : EMPTY_TREE;
-  if (scope !== 'untracked') {
+  {
     const specs = oldPath && oldPath !== rel ? [oldPath, rel] : [rel];
     const out = await git(root, [...trackedModeArgs(scope, base), ...DIFF_FLAGS, '-U1000000', '--', ...specs]);
     const text = out.stdout.toString('utf8');
@@ -193,7 +193,6 @@ export async function readSide(root: string, scope: Scope, rel: string, oldPath:
     return toLines(await readWorktree(root, rel));
   }
   const p = oldPath ?? rel;
-  if (scope === 'untracked') return null;
   if (scope === 'unstaged') return toLines(await cat(`:${p}`));
   return hasHead ? toLines(await cat(`HEAD:${p}`)) : null;
 }

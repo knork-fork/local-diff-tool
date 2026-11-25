@@ -1,5 +1,5 @@
-export type Scope = 'unstaged' | 'staged' | 'all' | 'untracked';
-export const SCOPES: Scope[] = ['unstaged', 'staged', 'all', 'untracked'];
+export type Scope = 'unstaged' | 'staged' | 'all';
+export const SCOPES: Scope[] = ['all', 'staged', 'unstaged'];
 export type Side = 'old' | 'new';
 export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
 
@@ -46,18 +46,8 @@ export interface Discussion {
   resolved: boolean;
   resolvedAt: string | null;
   outdated: boolean;
-  reviewId: string | null;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface Review {
-  id: string;
-  branch: string;
-  scope: Scope;
-  summary: string;
-  discussionIds: string[];
-  createdAt: string;
 }
 
 export interface Settings {
@@ -77,7 +67,6 @@ export interface ReviewData {
   repoPath?: string;
   reviewedFiles: Record<string, Record<string, ReviewedEntry>>; // scopeKey -> path -> entry
   discussions: Discussion[];
-  reviews: Review[];
   settings: Settings;
   createdAt: string;
   updatedAt: string;

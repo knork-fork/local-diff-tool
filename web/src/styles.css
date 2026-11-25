@@ -90,12 +90,12 @@ tr.gap td { background: var(--bg-3); text-align: center; padding: 2px; font: 12p
 tr.thread-row > td { padding: 6px 12px 10px 60px; background: var(--bg); white-space: normal; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-family: -apple-system, sans-serif; }
 .threads { display: flex; flex-direction: column; gap: 8px; max-width: 900px; font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .thread { background: var(--thread-bg); border: 1px solid var(--thread-border); border-radius: 8px; padding: 8px 12px; }
-.thread.resolved { opacity: .75; } .thread.outdated { border-style: dashed; }
+.thread.resolved { opacity: .75; } .thread-preview { margin: 2px 0; } .spacer-left { margin-left: auto; } .thread.outdated { border-style: dashed; }
 .thread-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; } .thread-path { font-weight: 600; }
 .anchor-code { margin: 4px 0; padding: 4px 8px; background: var(--bg-3); border-radius: 4px; overflow-x: auto; font-size: 12px; }
 .entry { padding: 6px 0; } .entry.reply { border-top: 1px solid var(--border); margin-left: 12px; }
 .entry-head { display: flex; gap: 8px; align-items: center; } .entry-actions { margin-left: auto; }
-.thread-foot { margin-top: 6px; } .comment-form { width: 100%; }
+.thread-foot { margin-top: 6px; } .comment-form { width: 100%; display: flex; flex-direction: column; gap: 8px; }
 .unplaced { margin: 12px; padding: 8px 12px; border: 1px dashed var(--warn); border-radius: 8px; }
 .unplaced-title { color: var(--warn); font-weight: 600; margin-bottom: 6px; }
 .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; } .md pre { background: var(--bg-3); padding: 8px; border-radius: 4px; overflow-x: auto; }

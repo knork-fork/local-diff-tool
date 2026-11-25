@@ -19,56 +19,6 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   );
 }
 
-export function ExportDialog({ api, onClose, reviewId }: { api: Api; onClose(): void; reviewId?: string }) {
-  const [format, setFormat] = useState<'markdown' | 'json'>('markdown');
-  const [include, setInclude] = useState('all');
-  const [unresolvedOnly, setUnresolvedOnly] = useState(true);
-  const [text, setText] = useState('');
-  const [msg, setMsg] = useState('');
-  useEffect(() => {
-    api.export({ format, include, unresolvedOnly, reviewId }).then((t) => setText(format === 'json' ? JSON.stringify(JSON.parse(t), null, 2) : t)).catch((e) => setText(e.message));
-  }, [api, format, include, unresolvedOnly, reviewId]);
-  const copy = async () => { try { await navigator.clipboard.writeText(text); setMsg('Copied!'); } catch { setMsg('Copy failed — select the text manually'); } };
-  const download = () => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-    a.download = `review.${format === 'json' ? 'json' : 'md'}`;
-    a.click();
-  };
-  return (
-    <Modal title="Export review comments" onClose={onClose} wide>
-      <div className="row gap wrap">
-        <select value={format} onChange={(e) => setFormat(e.target.value as any)}><option value="markdown">Markdown</option><option value="json">JSON</option></select>
-        <select value={include} onChange={(e) => setInclude(e.target.value)} disabled={!!reviewId}>
-          <option value="all">Pending + submitted</option><option value="pending">Pending only</option><option value="submitted">Submitted only</option>
-        </select>
-        <label><input type="checkbox" checked={unresolvedOnly} onChange={(e) => setUnresolvedOnly(e.target.checked)} /> Unresolved only</label>
-        <span className="spacer" />
-        <button className="btn primary" onClick={copy}>Copy to clipboard</button>
-        <button className="btn" onClick={download}>Download</button>
-        {msg && <span className="muted">{msg}</span>}
-      </div>
-      <pre className="export-text">{text}</pre>
-    </Modal>
-  );
-}
-
-export function SubmitDialog({ api, scope, pending, onClose, onDone }: { api: Api; scope: Scope; pending: number; onClose(): void; onDone(reviewId: string): void }) {
-  const [summary, setSummary] = useState('');
-  const [err, setErr] = useState('');
-  const submit = async () => {
-    try { const r = await api.submit(scope, summary); onDone(r.id); } catch (e: any) { setErr(e.message); }
-  };
-  return (
-    <Modal title="Submit review" onClose={onClose}>
-      <p>{pending} pending unresolved discussion{pending === 1 ? '' : 's'} will be submitted as a batch and become available through the API. Nothing is staged, committed or pushed.</p>
-      <textarea className="full" rows={4} placeholder="Optional summary…" value={summary} onChange={(e) => setSummary(e.target.value)} />
-      {err && <div className="error">{err}</div>}
-      <div className="row gap"><button className="btn primary" onClick={submit}>Submit review</button><button className="btn" onClick={onClose}>Cancel</button></div>
-    </Modal>
-  );
-}
-
 export function SettingsDialog({ theme, setTheme, contextLines, setContextLines, onClose }: {
   theme: string; setTheme(t: string): void; contextLines: number; setContextLines(n: number): void; onClose(): void;
 }) {

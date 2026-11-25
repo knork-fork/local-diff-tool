@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { HttpError, type ReviewData } from './types.js';
+import { HttpError, SCOPES, type ReviewData } from './types.js';
 
 export const SCHEMA_VERSION = 1;
 const FILE = 'review.json';
@@ -11,8 +11,8 @@ const queues = new Map<string, Promise<unknown>>();
 export function defaultData(): ReviewData {
   const now = new Date().toISOString();
   return {
-    schemaVersion: SCHEMA_VERSION, revision: 0, reviewedFiles: {}, discussions: [], reviews: [],
-    settings: { viewMode: 'unified', scope: 'unstaged', contextLines: 3 },
+    schemaVersion: SCHEMA_VERSION, revision: 0, reviewedFiles: {}, discussions: [],
+    settings: { viewMode: 'unified', scope: 'all', contextLines: 3 },
     createdAt: now, updatedAt: now,
   };
 }
@@ -21,13 +21,29 @@ export function defaultData(): ReviewData {
 const migrations: Record<number, (d: any) => any> = {};
 
 export class ReviewStore {
+  readonly repoDir: string;
   readonly dir: string;
   readonly file: string;
-  constructor(public root: string) {
-    // Central storage: <DATA_DIR>/<repo-name>-<hash of root path>/review.json
+  constructor(public root: string, public branch: string) {
+    // Central storage: <DATA_DIR>/<repo-name>-<hash of root path>/branches/<branch>-<hash>/review.json
     const key = `${path.basename(root).replace(/[^\w.-]/g, '_')}-${crypto.createHash('sha1').update(root).digest('hex').slice(0, 10)}`;
-    this.dir = path.join(dataDir(), key);
+    this.repoDir = path.join(dataDir(), key);
+    const bkey = `${branch.replace(/[^\w.-]/g, '_').slice(0, 60)}-${crypto.createHash('sha1').update(branch).digest('hex').slice(0, 8)}`;
+    this.dir = path.join(this.repoDir, 'branches', bkey);
     this.file = path.join(this.dir, FILE);
+  }
+
+  /** Pre-per-branch layout: one <repoDir>/review.json for all branches. Used (read-only) to seed a branch's file. */
+  private async legacy(): Promise<ReviewData | null> {
+    let old: any;
+    try { old = JSON.parse(await fs.readFile(path.join(this.repoDir, FILE), 'utf8')); } catch { return null; }
+    if (!old || !Array.isArray(old.discussions)) return null;
+    const d = defaultData();
+    d.discussions = old.discussions.filter((x: any) => x.branch === this.branch).map(({ reviewId, ...x }: any) => x);
+    for (const [k, v] of Object.entries(old.reviewedFiles ?? {})) if (k.startsWith(`${this.branch}::`)) d.reviewedFiles[k] = v as any;
+    if (old.settings) d.settings = { ...d.settings, ...old.settings };
+    if (!SCOPES.includes(d.settings.scope)) d.settings.scope = 'all';
+    return d;
   }
 
   async ensureDir() {
@@ -52,7 +68,7 @@ export class ReviewStore {
       text = await fs.readFile(this.file, 'utf8');
     } catch (e: any) {
       if (e instanceof HttpError) throw e;
-      if (e.code === 'ENOENT') return defaultData();
+      if (e.code === 'ENOENT') return (await this.legacy()) ?? defaultData();
       throw e;
     }
     let data: any;
@@ -75,9 +91,9 @@ export class ReviewStore {
 
   /** Serialised read-modify-write with a cross-process lock file and atomic rename. */
   mutate<T>(fn: (d: ReviewData) => T | Promise<T>): Promise<T> {
-    const prev = queues.get(this.root) ?? Promise.resolve();
+    const prev = queues.get(this.file) ?? Promise.resolve();
     const run = prev.catch(() => {}).then(() => this.locked(fn));
-    queues.set(this.root, run);
+    queues.set(this.file, run);
     return run;
   }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Markdown } from './markdown';
 import type { Discussion } from './types';
 
@@ -43,6 +43,8 @@ export function CommentForm({ initial = '', submitLabel, onSubmit, onCancel, aut
 export function Thread({ d, actions, showPath }: { d: Discussion; actions: Actions; showPath?: boolean }) {
   const [editing, setEditing] = useState<string | null>(null); // 'root' or reply id
   const [replying, setReplying] = useState(false);
+  const [collapsed, setCollapsed] = useState(d.resolved);
+  useEffect(() => { setCollapsed(d.resolved); }, [d.resolved]);
   const [error, setError] = useState('');
   const run = async (fn: () => Promise<void>) => { setError(''); try { await fn(); } catch (e: any) { setError(e.message); } };
   const lines = d.startLine === d.endLine ? `line ${d.startLine}` : `lines ${d.startLine}–${d.endLine}`;
@@ -50,11 +52,13 @@ export function Thread({ d, actions, showPath }: { d: Discussion; actions: Actio
     <div className={`thread${d.resolved ? ' resolved' : ''}${d.outdated ? ' outdated' : ''}`}>
       <div className="thread-head">
         {showPath && <span className="thread-path">{d.path}</span>}
-        <span className="muted">{lines} · {d.side} side</span>
+        <span className="muted">{lines}</span>
         {d.outdated && <span className="badge warn" title="The commented code changed or was removed">Outdated</span>}
         {d.resolved && <span className="badge ok">Resolved</span>}
-        <span className={`badge ${d.reviewId ? 'info' : ''}`}>{d.reviewId ? 'Submitted' : 'Pending'}</span>
+        {d.resolved && <button className="btn small spacer-left" onClick={() => setCollapsed(!collapsed)}>{collapsed ? 'Expand' : 'Collapse'}</button>}
       </div>
+      {collapsed && <div className="muted small thread-preview">{d.author}: {d.body.split('\n')[0].slice(0, 120)}</div>}
+      {!collapsed && <>
       {(d.outdated || showPath) && d.anchor.lines.length > 0 && (
         <pre className="anchor-code">{d.anchor.lines.slice(0, 8).join('\n')}</pre>
       )}
@@ -85,6 +89,7 @@ export function Thread({ d, actions, showPath }: { d: Discussion; actions: Actio
           </>
         )}
       </div>
+      </>}
     </div>
   );
 }

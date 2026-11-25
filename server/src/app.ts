@@ -71,10 +71,6 @@ export function buildApp(opts: { webDir?: string } = {}): FastifyInstance {
     const r = await getRepo(req.params.id);
     return r.refresh(await r.resolveScope(req.body?.scope));
   });
-  app.get<{ Params: P; Querystring: Q }>(`${R}/review`, async (req) => {
-    const r = await getRepo(req.params.id);
-    return r.reviewState(await r.resolveScope(req.query.scope));
-  });
   app.put<{ Params: P; Body: Record<string, any> }>(`${R}/files/reviewed`, async (req) => {
     const r = await getRepo(req.params.id);
     return r.setReviewed(await r.resolveScope(req.body?.scope), req.body?.path, !!req.body?.reviewed);
@@ -85,7 +81,7 @@ export function buildApp(opts: { webDir?: string } = {}): FastifyInstance {
   app.get<{ Params: P; Querystring: Q }>(`${R}/discussions`, async (req) => {
     const r = await getRepo(req.params.id);
     const q = req.query;
-    return { discussions: await r.listDiscussions({ file: q.file, resolved: bool(q.resolved), outdated: bool(q.outdated), submitted: bool(q.submitted), reviewId: q.reviewId }) };
+    return { discussions: await r.listDiscussions({ file: q.file, resolved: bool(q.resolved), outdated: bool(q.outdated) }) };
   });
   app.post<{ Params: P; Body: Record<string, any> }>(`${R}/discussions`, async (req, reply) => reply.status(201).send(await (await getRepo(req.params.id)).createDiscussion(req.body ?? {})));
   app.patch<{ Params: P; Body: Record<string, any> }>(`${R}/discussions/:discussionId`, async (req) => (await getRepo(req.params.id)).updateDiscussion(req.params.discussionId!, req.body ?? {}));
@@ -99,15 +95,6 @@ export function buildApp(opts: { webDir?: string } = {}): FastifyInstance {
     (await getRepo(req.params.id)).updateReply(req.params.discussionId!, req.params.replyId!, req.body ?? {}));
   app.delete<{ Params: P }>(`${R}/discussions/:discussionId/replies/:replyId`, async (req) =>
     (await getRepo(req.params.id)).deleteReply(req.params.discussionId!, req.params.replyId!));
-
-  app.post<{ Params: P; Body: Record<string, any> }>(`${R}/reviews`, async (req, reply) => reply.status(201).send(await (await getRepo(req.params.id)).submitReview(req.body ?? {})));
-  app.get<{ Params: P }>(`${R}/reviews`, async (req) => ({ reviews: (await (await getRepo(req.params.id)).store.read()).reviews }));
-  app.get<{ Params: P; Querystring: Q }>(`${R}/export`, async (req, reply) => {
-    const r = await getRepo(req.params.id);
-    const format = req.query.format === 'markdown' ? 'markdown' : 'json';
-    const out = await r.export({ format, include: req.query.include, reviewId: req.query.reviewId, unresolvedOnly: bool(req.query.unresolvedOnly) });
-    return reply.type(out.type).send(out.body);
-  });
 
   const webDir = opts.webDir;
   if (webDir && fs.existsSync(webDir)) {
