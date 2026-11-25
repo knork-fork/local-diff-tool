@@ -131,8 +131,8 @@ function RepoPage({ id }: { id: string }) {
     const n = i < 0 ? (delta > 0 ? 0 : ordered.length - 1) : (i + delta + ordered.length) % ordered.length;
     select(ordered[n].path);
   };
-  const nextUnreviewed = () => {
-    const all = flatten(data?.files ?? []);
+  const nextUnreviewed = (files = data?.files ?? []) => {
+    const all = flatten(files);
     const i = all.findIndex((f) => f.path === selected);
     for (let k = 1; k <= all.length; k++) {
       const f = all[(i + k + all.length) % all.length];
@@ -141,13 +141,27 @@ function RepoPage({ id }: { id: string }) {
     setNotice('All files are reviewed 🎉');
   };
 
+  const spaceReview = () => {
+    if (!current) return;
+    guarded(async () => {
+      const r = await api.setReviewed(scope, current.path, !current.reviewed);
+      setData(r);
+      if (!current.reviewed) nextUnreviewed(r.files);
+    });
+  };
+
   useEffect(() => {
+    const skip = (e: KeyboardEvent) => /INPUT|TEXTAREA|SELECT/.test((e.target as HTMLElement).tagName) || e.ctrlKey || e.metaKey || e.altKey;
     const h = (e: KeyboardEvent) => {
-      if (/INPUT|TEXTAREA|SELECT/.test((e.target as HTMLElement).tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (skip(e)) return;
       if (e.key === 'j') goto(1); else if (e.key === 'k') goto(-1);
+      else if (e.key === ' ') { e.preventDefault(); if (!e.repeat && !busy) spaceReview(); }
     };
+    // stop a focused button from also being clicked by the space key
+    const up = (e: KeyboardEvent) => { if (e.key === ' ' && !skip(e)) e.preventDefault(); };
     window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', h); window.removeEventListener('keyup', up); };
   });
 
   const actions: Actions = useMemo(() => {
@@ -200,7 +214,7 @@ function RepoPage({ id }: { id: string }) {
         <Sidebar files={visible} selected={selected} onSelect={(f) => select(f.path)} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} />
         <main className="main">
           {!current ? (
-            <div className="empty">{t.files === 0 ? 'No changes in this scope.' : 'Select a file from the sidebar to review its diff. (j / k to move between files)'}</div>
+            <div className="empty">{t.files === 0 ? 'No changes in this scope.' : 'Select a file from the sidebar to review its diff. (j / k to move between files, space to review)'}</div>
           ) : (
             <>
               <div className="file-head">
@@ -210,11 +224,11 @@ function RepoPage({ id }: { id: string }) {
                   <span className="muted"><span className="add">+{current.additions}</span> <span className="del">−{current.deletions}</span></span>
                 </div>
                 <div className="row gap">
-                  <button className="btn small" onClick={() => goto(-1)}>← Prev</button>
-                  <button className="btn small" onClick={() => goto(1)}>Next →</button>
-                  <button className="btn small" onClick={nextUnreviewed}>Next unreviewed ⇥</button>
+                  <button className="btn small" onClick={() => goto(-1)} title="Previous file (K)">← Prev</button>
+                  <button className="btn small" onClick={() => goto(1)} title="Next file (J)">Next →</button>
+                  <button className="btn small" onClick={() => nextUnreviewed()}>Next unreviewed ⇥</button>
                   <button className={`btn small${showAll ? ' on' : ''}`} onClick={() => setShowAll(!showAll)}>{showAll ? 'Collapse unchanged' : 'Show full file'}</button>
-                  <label className="reviewed-toggle"><input type="checkbox" checked={current.reviewed} onChange={() => toggleReviewed(current)} /> {current.reviewed ? 'Unreview' : 'Review'}</label>
+                  <label className="reviewed-toggle" title="Space"><input type="checkbox" checked={current.reviewed} onChange={() => toggleReviewed(current)} /> {current.reviewed ? 'Unreview' : 'Review'}</label>
                 </div>
               </div>
               {needsConfirm && current && (
