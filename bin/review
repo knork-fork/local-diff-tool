@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # review — open a local git repository in the Local Review app (http://localhost:22222).
-# Usage: review [path-to-repo] [list-comments | list-comment <comment-id> | clear | help]
+# Usage: review [path-to-repo] [list-comments | list-comment <comment-id> | reply <comment-id> <text> [author] | clear | help]
 # The app itself is started separately with `docker compose up -d` in the app repo.
 set -euo pipefail
 
@@ -26,6 +26,10 @@ Arguments:
 Commands (all optional; without one, the repo is opened in the browser):
   list-comments         Print unresolved comments as file:line plus the thread.
   list-comment <id>     Print one comment thread in any state. <id> is required.
+  reply <id> <text> [author]
+                        Add a reply to the thread of comment <id>. <id> and <text> are
+                        required (quote the text); [author] is optional and defaults to
+                        REVIEW_AUTHOR, then "Agent".
   clear                 Delete all comments of the current repo and branch.
   help                  Show this help (also: -h, --help).
 
@@ -35,16 +39,20 @@ Examples:
   review list-comments                        List comments of the repo you are in
   review /abs/path/to/repo list-comments      List comments of that repo
   review /abs/path/to/repo list-comment <id>
+  review reply <id> 'Fixed by extracting a helper'
+  review reply <id> 'Fixed by extracting a helper' 'Claude'
+  review /abs/path/to/repo reply <id> 'Fixed by extracting a helper'
 
 Environment:
   REVIEW_PORT           App port (default 22222).
+  REVIEW_AUTHOR         Author name for replies (default Agent).
 EOF_HELP
 }
 
 command -v git >/dev/null || die "git is not installed"
 command -v curl >/dev/null || die "curl is not installed"
 
-is_cmd() { case "$1" in list-comments|list-comment|clear|help|-h|--help) return 0 ;; *) return 1 ;; esac; }
+is_cmd() { case "$1" in list-comments|list-comment|reply|clear|help|-h|--help) return 0 ;; *) return 1 ;; esac; }
 
 target="."
 if [ $# -gt 0 ] && ! is_cmd "$1"; then
@@ -56,6 +64,7 @@ case "$cmd" in
   ""|list-comments|clear) ;;
   help|-h|--help) usage; exit 0 ;;
   list-comment) [ -n "${2:-}" ] || { echo "review: list-comment requires a <comment-id>" >&2; echo >&2; usage >&2; exit 1; } ;;
+  reply) { [ -n "${2:-}" ] && [ -n "${3:-}" ] && [ $# -le 4 ]; } || { echo "review: reply requires <comment-id> and '<comment text>' (quote the text), optionally followed by [author]" >&2; echo >&2; usage >&2; exit 1; } ;;
   *) echo "review: unknown command: $cmd" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
 [ -z "$cmd" ] || [ "$cmd" = clear ] || command -v jq >/dev/null || die "jq is required for $cmd"
@@ -95,13 +104,27 @@ if [ "$cmd" = clear ]; then
   exit 0
 fi
 
+if [ "$cmd" = reply ]; then
+  payload="$(jq -n --arg b "$3" --arg a "${4:-${REVIEW_AUTHOR:-Agent}}" '{body:$b,author:$a}')"
+  out="$(curl -sS --max-time 20 -w '\n%{http_code}' -H 'Content-Type: application/json' -d "$payload" "$BASE/api/repositories/$id/discussions/$2/replies")" || die "could not reach the API at $BASE"
+  code="${out##*$'\n'}"; out="${out%$'\n'*}"
+  [ "$code" = 201 ] || die "could not add reply: $(printf '%s' "$out" | jq -r '.error.message // empty' 2>/dev/null || true) (HTTP $code)"
+  echo "Replied to comment $2."
+  exit 0
+fi
+
 if [ -n "$cmd" ]; then
-  fmt='"\(.file):\(.line)\(if .resolved then " [resolved]" else "" end)\(if .outdated then " [outdated]" else "" end)\n  \(.author): \(.body | gsub("\n"; "\n  "))\(.replies | map("\n  \(.author): \(.body | gsub("\n"; "\n  "))") | join(""))"'
+  fmt='"\(.file):\(.line)\(if .resolved then " [resolved]" else "" end)\(if .outdated then " [outdated]" else "" end)\n  \(.author): \(.body | gsub("\n"; "\n  "))\(.replies | map("\n  \(.author): \(.body | gsub("\n"; "\n  "))") | join(""))\n  (id: \(.id))"'
   if [ "$cmd" = list-comments ]; then ep="comments"; sel=".comments[]"; else ep="comments/$2"; sel="."; fi
   out="$(curl -sS --max-time 60 -w '\n%{http_code}' "$BASE/api/repositories/$id/$ep")" || die "could not reach the API at $BASE"
   code="${out##*$'\n'}"; out="${out%$'\n'*}"
   [ "$code" = 200 ] || die "$(printf '%s' "$out" | jq -r '.error.message // empty' 2>/dev/null || true)${out:+ (HTTP $code)}"
-  printf '%s' "$out" | jq -r "$sel | $fmt"
+  printf '%s' "$out" | jq -r --arg root "$root" "$sel | $fmt"
+  cat <<EOF_AGENT
+
+---
+Agents: answer a comment by id with: review $(printf '%q' "$root") reply <id> '<text>' (posted as "${REVIEW_AUTHOR:-Agent}"; don't resolve or delete comments).
+EOF_AGENT
   exit 0
 fi
 
