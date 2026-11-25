@@ -26,19 +26,17 @@ review
 
 This opens the review UI for that repo in your browser. You can also pass a path: `review /absolute/path/to/repo`.
 
-## Listing comments
+## Usage with Claude
 
-Print the unresolved comments (as `file:line` plus the thread) from the terminal:
+1. Run `review` in the terminal (inside the repo).
+2. Leave comments in the browser window that opens.
+3. Tell Claude to run `review list-comments`.
 
-```bash
-review /absolute/path/to/repo list-comments
-# or, from inside the repo directory:
-review list-comments
-```
+Optionally, click "Copy cmd" on a specific comment and give Claude that command instead of `review list-comments`.
 
-The output is plain text, so you can hand it to Claude or any other AI assistant/tool to have the review comments addressed, e.g. `review list-comments | claude "fix these review comments"`.
+`list-comments` prints the unresolved comments (as `file:line` plus the thread) as plain text. It also works with a path (`review /absolute/path/to/repo list-comments`) or piped into any assistant, e.g. `review list-comments | claude "fix these review comments"`.
 
-Each comment is listed with its id and a ready-to-run reply command. Reply to a thread from the terminal (the text must be quoted; posted as author `Agent`, override with `REVIEW_AUTHOR`):
+Each comment is listed with its id and a ready-to-run reply command. Claude (or you) can reply to a thread from the terminal (the text must be quoted). The reply shows up in the browser under the name `Agent` by default; to use another name, pass it as a last argument (`... 'text' 'Claude'`) or set `REVIEW_AUTHOR`:
 
 ```bash
 review reply <comment id> 'Fixed by extracting a helper'
