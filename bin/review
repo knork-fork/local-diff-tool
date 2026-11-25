@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # review — open a local git repository in the Local Review app (http://localhost:22222).
-# Usage: review [path-to-repo] [list-comments | list-comment <comment-id> | clear]
+# Usage: review [path-to-repo] [list-comments | list-comment <comment-id> | clear | help]
 # The app itself is started separately with `docker compose up -d` in the app repo.
 set -euo pipefail
 
@@ -9,17 +9,54 @@ BASE="http://localhost:${PORT}"
 
 die() { echo "review: $*" >&2; exit 1; }
 
+usage() {
+  cat <<'EOF_HELP'
+Usage: review [path] [command]
+
+Opens a local git repository in the Local Review app (http://localhost:22222),
+or runs a command against its comments. The app must already be running
+(docker compose up -d).
+
+Arguments:
+  path                  Optional. The repo to use, given as any path inside it. Either:
+                          - run review from inside the repo (no path needed), or
+                          - pass the repo path: review /abs/path/to/repo [command]
+                        The path must come before the command.
+
+Commands (all optional; without one, the repo is opened in the browser):
+  list-comments         Print unresolved comments as file:line plus the thread.
+  list-comment <id>     Print one comment thread in any state. <id> is required.
+  clear                 Delete all comments of the current repo and branch.
+  help                  Show this help (also: -h, --help).
+
+Examples:
+  review                                      Open the repo you are in
+  review /abs/path/to/repo                    Open that repo from anywhere
+  review list-comments                        List comments of the repo you are in
+  review /abs/path/to/repo list-comments      List comments of that repo
+  review /abs/path/to/repo list-comment <id>
+
+Environment:
+  REVIEW_PORT           App port (default 22222).
+EOF_HELP
+}
+
 command -v git >/dev/null || die "git is not installed"
 command -v curl >/dev/null || die "curl is not installed"
 
+is_cmd() { case "$1" in list-comments|list-comment|clear|help|-h|--help) return 0 ;; *) return 1 ;; esac; }
+
 target="."
-if [ $# -gt 0 ] && [ "$1" != list-comments ] && [ "$1" != list-comment ] && [ "$1" != clear ]; then target="$1"; shift; fi
+if [ $# -gt 0 ] && ! is_cmd "$1"; then
+  [ -e "$1" ] || { echo "review: unknown command or path does not exist: $1" >&2; echo >&2; usage >&2; exit 1; }
+  target="$1"; shift
+fi
 cmd="${1:-}"
 case "$cmd" in
-  ""|list-comments) ;;
-  clear) ;;
-  list-comment) [ -n "${2:-}" ] || die "usage: review [path] list-comment <comment-id>" ;;
-  *) die "unknown command: $cmd (expected list-comments, list-comment <id> or clear)" ;;
+  ""|list-comments|clear) ;;
+  help|-h|--help) usage; exit 0 ;;
+  list-comment) [ -n "${2:-}" ] || { echo "review: list-comment requires a <comment-id>" >&2; echo >&2; usage >&2; exit 1; } ;;
+  *) echo "review: unknown command: $cmd" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
 [ -z "$cmd" ] || [ "$cmd" = clear ] || command -v jq >/dev/null || die "jq is required for $cmd"
 [ -e "$target" ] || die "path does not exist: $target"
