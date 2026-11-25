@@ -245,7 +245,7 @@ function RepoPage({ id }: { id: string }) {
         </main>
       </div>
       {dialog === 'settings' && <SettingsDialog theme={theme} setTheme={setTheme} contextLines={settings.contextLines} setContextLines={(n) => patchSettings({ contextLines: n })} onClose={() => setDialog(null)} />}
-      {dialog === 'discussions' && <DiscussionsDialog discussions={discussions} actions={globalActions} onOpenFile={(p) => select(p)} onClose={() => setDialog(null)} />}
+      {dialog === 'discussions' && <DiscussionsDialog discussions={discussions} actions={globalActions} onOpenFile={(p) => select(p)} onClearAll={() => guarded(async () => { await api.clearAll(); await reload(); })} onClose={() => setDialog(null)} />}
     </div>
   );
 }

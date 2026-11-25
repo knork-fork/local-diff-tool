@@ -35,15 +35,18 @@ export function SettingsDialog({ theme, setTheme, contextLines, setContextLines,
   );
 }
 
-export function DiscussionsDialog({ discussions, actions, onOpenFile, onClose }: {
-  discussions: Discussion[]; actions: Actions; onOpenFile(path: string): void; onClose(): void;
+export function DiscussionsDialog({ discussions, actions, onOpenFile, onClearAll, onClose }: {
+  discussions: Discussion[]; actions: Actions; onOpenFile(path: string): void; onClearAll(): Promise<void>; onClose(): void;
 }) {
   const [unresolvedOnly, setUnresolvedOnly] = useState(true);
   const list = discussions.filter((d) => !unresolvedOnly || !d.resolved);
   const files = [...new Set(list.map((d) => d.path))].sort();
   return (
     <Modal title={`Discussions (${list.length})`} onClose={onClose} wide>
-      <label><input type="checkbox" checked={unresolvedOnly} onChange={(e) => setUnresolvedOnly(e.target.checked)} /> Unresolved only</label>
+      <div className="row gap">
+        <label><input type="checkbox" checked={unresolvedOnly} onChange={(e) => setUnresolvedOnly(e.target.checked)} /> Unresolved only</label>
+        {discussions.length > 0 && <button className="btn small danger" onClick={() => { if (confirm(`Delete all ${discussions.length} discussion(s) on this branch? This cannot be undone.`)) onClearAll(); }}>Clear all</button>}
+      </div>
       {list.length === 0 && <p className="muted">No discussions.</p>}
       {files.map((f) => (
         <div key={f} className="disc-file">

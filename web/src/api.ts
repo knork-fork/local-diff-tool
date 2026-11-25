@@ -34,6 +34,7 @@ export const makeApi = (id: string) => {
       req<Discussion>('POST', `${b}/discussions`, { scope, path, side, startLine, endLine, body }),
     update: (id: string, patch: { body?: string; resolved?: boolean }) => req<Discussion>('PATCH', `${b}/discussions/${id}`, patch),
     remove: (id: string) => req<void>('DELETE', `${b}/discussions/${id}`),
+    clearAll: () => req<{ cleared: number }>('DELETE', `${b}/comments`),
     reply: (id: string, body: string) => req<Discussion>('POST', `${b}/discussions/${id}/replies`, { body }),
     updateReply: (id: string, rid: string, body: string) => req<Discussion>('PATCH', `${b}/discussions/${id}/replies/${rid}`, { body }),
     removeReply: (id: string, rid: string) => req<Discussion>('DELETE', `${b}/discussions/${id}/replies/${rid}`),
