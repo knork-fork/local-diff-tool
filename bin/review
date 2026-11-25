@@ -123,7 +123,7 @@ if [ -n "$cmd" ]; then
   cat <<EOF_AGENT
 
 ---
-Agents: answer a comment by id with: review $(printf '%q' "$root") reply <id> '<text>' (posted as "${REVIEW_AUTHOR:-Agent}"; don't resolve or delete comments).
+Agents: answer a comment by id with: review $(printf '%q' "$root") reply <id> '<markdown text>' '<your agent name>' (don't resolve or delete comments).
 EOF_AGENT
   exit 0
 fi
