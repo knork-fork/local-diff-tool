@@ -90,13 +90,18 @@ function RepoPage({ id }: { id: string }) {
 
   // Only the selected file's diff is ever fetched.
   const [diffTick, setDiffTick] = useState(0);
+  // Large diffs (> BIG_DIFF changed lines) need a per-file confirmation before rendering.
+  const BIG_DIFF = 500;
+  const [confirmedBig, setConfirmedBig] = useState(false);
+  useEffect(() => setConfirmedBig(false), [scope, current?.path]); // never remembered: re-ask whenever a file is (re)selected
+  const needsConfirm = !!current && current.additions + current.deletions > BIG_DIFF && !confirmedBig;
   useEffect(() => {
     setDiff(null); setDiffErr('');
-    if (!current) return;
+    if (!current || needsConfirm) return;
     let live = true;
     api.diff(scope, current.path, current.oldPath).then((d) => live && setDiff(d)).catch((e) => live && setDiffErr(e.message));
     return () => { live = false; };
-  }, [api, scope, current?.path, current?.oldPath, current?.fingerprint, diffTick]);
+  }, [api, scope, current?.path, current?.oldPath, current?.fingerprint, diffTick, needsConfirm]);
 
   const reload = useCallback(() => loadFiles(scope).catch((e) => setNotice(e.message)), [loadFiles, scope]);
 
@@ -212,8 +217,14 @@ function RepoPage({ id }: { id: string }) {
                   <label className="reviewed-toggle"><input type="checkbox" checked={current.reviewed} onChange={() => toggleReviewed(current)} /> {current.reviewed ? 'Unreview' : 'Review'}</label>
                 </div>
               </div>
+              {needsConfirm && current && (
+                <div className="empty">
+                  <p>This diff is large ({current.additions + current.deletions} changed lines). Are you sure you want to display it?</p>
+                  <button className="btn" onClick={() => setConfirmedBig(true)}>Display diff</button>
+                </div>
+              )}
               {diffErr && <div className="error pad">{diffErr}</div>}
-              {!diff && !diffErr && <div className="muted pad">Loading diff…</div>}
+              {!needsConfirm && !diff && !diffErr && <div className="muted pad">Loading diff…</div>}
               {diff && <DiffView diff={diff} discussions={fileDiscussions} viewMode={settings.viewMode} contextLines={settings.contextLines} showAll={showAll} actions={actions} />}
             </>
           )}

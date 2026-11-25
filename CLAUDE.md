@@ -40,5 +40,6 @@ A task is done only when:
 - Record new commands, scripts, services/ports, env vars (never use `.env.local`), and data/schema conventions (how it is managed and where).
 - Remove or correct anything that is no longer true. Replace the "nothing yet" placeholders above as they get filled in.
 - Keep it concise; don't duplicate what the code makes obvious, and don't log history, changelogs or per-task details (that's what git is for). If an entry just restates what a quick look at the code would tell you, leave it out. Prefer a pointer to a file over a description of its contents.
+- **Default to adding nothing.** Most features (UI behavior, thresholds, prompts, labels, copy, styling) need no entry: a session finds them by reading the code. Only add what a fresh session would get wrong or waste time rediscovering: gotchas, cross-file invariants, env/infra quirks, non-obvious *why*. Before adding a line, ask "would reading the relevant file make this obvious?"; if yes, skip it. Before finishing, also re-read the lines you added this task and delete any that fail that test.
 - Before finishing any task, re-read this file and ask: would a fresh session be misled by anything here, or missing something it can't cheaply discover? Fix it.
 - **Never edit `README.md`**; the user maintains it themselves. Put anything a future session needs in this file instead.
