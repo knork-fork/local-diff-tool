@@ -1,0 +1,288 @@
+import crypto from 'node:crypto';
+import path from 'node:path';
+import { makeAnchor, relocate } from './anchor.js';
+import { parsePatch } from './diffparse.js';
+import { exportMarkdown } from './export.js';
+import { filePatch, listChanges, readSide, repoInfo } from './git.js';
+import { repoIdFor, safeRelPath } from './paths.js';
+import { ReviewStore } from './store.js';
+import { HttpError, SCOPES, type ChangedFile, type Discussion, type ReviewData, type Scope, type Settings, type Side } from './types.js';
+
+const uid = () => crypto.randomUUID();
+const now = () => new Date().toISOString();
+const scopeKey = (branch: string, scope: Scope) => `${branch}::${scope}`;
+
+export function parseScope(v: unknown, fallback: Scope = 'unstaged'): Scope {
+  if (v === undefined || v === '') return fallback;
+  if (!SCOPES.includes(v as Scope)) throw new HttpError(400, 'invalid_scope', `scope must be one of ${SCOPES.join(', ')}`);
+  return v as Scope;
+}
+
+const str = (v: unknown, name: string, max = 100_000): string => {
+  if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, 'invalid_body', `${name} is required`);
+  if (v.length > max) throw new HttpError(400, 'invalid_body', `${name} is too long`);
+  return v;
+};
+
+export interface DiscussionFilter { file?: string; resolved?: boolean; outdated?: boolean; submitted?: boolean; branch?: string; reviewId?: string }
+
+export class Repo {
+  readonly id: string;
+  readonly store: ReviewStore;
+  constructor(readonly root: string) {
+    this.id = repoIdFor(root);
+    this.store = new ReviewStore(root);
+  }
+
+  async info() {
+    const { branch, hasHead } = await repoInfo(this.root);
+    return {
+      id: this.id, name: path.basename(this.root), path: this.root, branch, hasHead,
+      reviewUrl: `/repositories/${this.id}`,
+    };
+  }
+
+  async init() {
+    await this.store.ensureDir();
+    return this.info();
+  }
+
+  private async scopeFallback(): Promise<Scope> {
+    return (await this.store.read()).settings.scope;
+  }
+
+  async resolveScope(v: unknown) { return parseScope(v, await this.scopeFallback()); }
+
+  private decorate(data: ReviewData, branch: string, scope: Scope, files: ChangedFile[]) {
+    const reviewed = data.reviewedFiles[scopeKey(branch, scope)] ?? {};
+    const mine = data.discussions.filter((d) => d.branch === branch);
+    const out = files.map((f) => {
+      const ds = mine.filter((d) => d.path === f.path);
+      return {
+        ...f,
+        reviewed: reviewed[f.path]?.fingerprint === f.fingerprint,
+        discussionCount: ds.length,
+        unresolvedCount: ds.filter((d) => !d.resolved).length,
+      };
+    });
+    return {
+      branch, scope, files: out,
+      totals: {
+        files: out.length,
+        additions: out.reduce((s, f) => s + f.additions, 0),
+        deletions: out.reduce((s, f) => s + f.deletions, 0),
+        reviewed: out.filter((f) => f.reviewed).length,
+        unresolvedDiscussions: mine.filter((d) => !d.resolved).length,
+        totalDiscussions: mine.length,
+      },
+    };
+  }
+
+  async files(scope: Scope) {
+    const [{ branch }, files, data] = await Promise.all([repoInfo(this.root), listChanges(this.root, scope), this.store.read()]);
+    return this.decorate(data, branch, scope, files);
+  }
+
+  async diff(scope: Scope, rel: string, oldPath: string | null) {
+    rel = safeRelPath(rel);
+    if (oldPath) oldPath = safeRelPath(oldPath);
+    const res = await filePatch(this.root, scope, rel, oldPath);
+    if (!res) throw new HttpError(404, 'no_changes', `No changes for ${rel} in scope ${scope}`);
+    const p = parsePatch(res.patch);
+    return {
+      path: rel, oldPath: p.oldPath ?? (oldPath && oldPath !== rel ? oldPath : null), scope,
+      status: p.isNew ? 'added' : p.isDeleted ? 'deleted' : p.isRename ? 'renamed' : 'modified',
+      untracked: res.untracked, binary: p.binary, hunks: p.hunks,
+    };
+  }
+
+  /** Refresh: invalidate stale reviewed files, re-anchor discussions, persist. */
+  async refresh(scope: Scope) {
+    const { branch } = await repoInfo(this.root);
+    const files = await listChanges(this.root, scope);
+    const oldPathOf = new Map(files.filter((f) => f.oldPath).map((f) => [f.path, f.oldPath!]));
+    const report = { invalidated: [] as string[], outdated: [] as string[], relocated: [] as string[], reopened: [] as string[] };
+    const data = await this.store.mutate(async (d) => {
+      const key = scopeKey(branch, scope);
+      const reviewed = d.reviewedFiles[key] ?? {};
+      const byPath = new Map(files.map((f) => [f.path, f]));
+      for (const [p, entry] of Object.entries(reviewed)) {
+        if (byPath.get(p)?.fingerprint !== entry.fingerprint) { delete reviewed[p]; report.invalidated.push(p); }
+      }
+      d.reviewedFiles[key] = reviewed;
+      const cache = new Map<string, string[] | null>();
+      for (const disc of d.discussions) {
+        if (disc.branch !== branch) continue;
+        const ck = `${disc.side}:${disc.path}`;
+        if (!cache.has(ck)) cache.set(ck, await readSide(this.root, scope, disc.path, oldPathOf.get(disc.path) ?? null, disc.side));
+        const r = relocate(cache.get(ck)!, disc.anchor, disc.startLine, disc.endLine);
+        if (r.found) {
+          if (r.start !== disc.startLine) report.relocated.push(disc.id);
+          if (disc.outdated) report.reopened.push(disc.id);
+          disc.startLine = r.start; disc.endLine = r.end; disc.outdated = false;
+        } else if (!disc.outdated) { disc.outdated = true; report.outdated.push(disc.id); }
+      }
+      return JSON.parse(JSON.stringify(d)) as ReviewData;
+    });
+    return { ...this.decorate(data, branch, scope, files), refresh: report };
+  }
+
+  async setReviewed(scope: Scope, rel: string, reviewed: boolean) {
+    rel = safeRelPath(rel);
+    const { branch } = await repoInfo(this.root);
+    const files = await listChanges(this.root, scope);
+    const f = files.find((x) => x.path === rel);
+    if (!f) throw new HttpError(404, 'no_changes', `${rel} has no changes in scope ${scope}`);
+    await this.store.mutate((d) => {
+      const key = scopeKey(branch, scope);
+      d.reviewedFiles[key] ??= {};
+      if (reviewed) d.reviewedFiles[key][rel] = { fingerprint: f.fingerprint, reviewedAt: now() };
+      else delete d.reviewedFiles[key][rel];
+    });
+    return this.files(scope);
+  }
+
+  async reviewState(scope: Scope) {
+    const data = await this.store.read();
+    const f = await this.files(scope);
+    return { ...f, reviews: data.reviews, settings: data.settings, revision: data.revision };
+  }
+
+  async settings(patch?: Partial<Settings>) {
+    if (!patch) return (await this.store.read()).settings;
+    return this.store.mutate((d) => {
+      if (patch.viewMode !== undefined) {
+        if (patch.viewMode !== 'unified' && patch.viewMode !== 'split') throw new HttpError(400, 'invalid_body', 'invalid viewMode');
+        d.settings.viewMode = patch.viewMode;
+      }
+      if (patch.scope !== undefined) d.settings.scope = parseScope(patch.scope);
+      if (patch.contextLines !== undefined) {
+        if (!Number.isInteger(patch.contextLines) || patch.contextLines < 0 || patch.contextLines > 50) throw new HttpError(400, 'invalid_body', 'invalid contextLines');
+        d.settings.contextLines = patch.contextLines;
+      }
+      return { ...d.settings };
+    });
+  }
+
+  // ---- discussions ----
+  async listDiscussions(f: DiscussionFilter = {}) {
+    const data = await this.store.read();
+    const branch = f.branch ?? (await repoInfo(this.root)).branch;
+    return data.discussions.filter((d) =>
+      d.branch === branch &&
+      (f.file === undefined || d.path === f.file) &&
+      (f.resolved === undefined || d.resolved === f.resolved) &&
+      (f.outdated === undefined || d.outdated === f.outdated) &&
+      (f.submitted === undefined || (d.reviewId !== null) === f.submitted) &&
+      (f.reviewId === undefined || d.reviewId === f.reviewId));
+  }
+
+  async createDiscussion(b: any): Promise<Discussion> {
+    const scope = await this.resolveScope(b.scope);
+    const rel = safeRelPath(b.path);
+    const side: Side = b.side === 'old' ? 'old' : b.side === 'new' ? 'new' : (() => { throw new HttpError(400, 'invalid_body', 'side must be old or new'); })();
+    const startLine = Number(b.startLine);
+    const endLine = b.endLine === undefined ? startLine : Number(b.endLine);
+    if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || startLine < 1 || endLine < startLine) throw new HttpError(400, 'invalid_body', 'invalid line range');
+    const body = str(b.body, 'body');
+    const { branch } = await repoInfo(this.root);
+    const files = await listChanges(this.root, scope);
+    const f = files.find((x) => x.path === rel);
+    const lines = await readSide(this.root, scope, rel, f?.oldPath ?? null, side);
+    if (!lines || endLine > lines.length) throw new HttpError(400, 'invalid_lines', 'Lines do not exist on that side of the file');
+    const t = now();
+    const d: Discussion = {
+      id: uid(), branch, scope, path: rel, side, startLine, endLine, originalStartLine: startLine, originalEndLine: endLine,
+      anchor: makeAnchor(lines, startLine, endLine), fingerprint: f?.fingerprint ?? '', body,
+      author: typeof b.author === 'string' && b.author ? b.author : 'You', replies: [],
+      resolved: false, resolvedAt: null, outdated: false, reviewId: null, createdAt: t, updatedAt: t,
+    };
+    await this.store.mutate((data) => { data.discussions.push(d); });
+    return d;
+  }
+
+  private async withDiscussion<T>(id: string, fn: (d: Discussion, data: ReviewData) => T): Promise<T> {
+    return this.store.mutate((data) => {
+      const d = data.discussions.find((x) => x.id === id);
+      if (!d) throw new HttpError(404, 'not_found', 'Discussion not found');
+      const r = fn(d, data);
+      d.updatedAt = now();
+      return r;
+    });
+  }
+
+  updateDiscussion(id: string, b: any) {
+    return this.withDiscussion(id, (d) => {
+      if (b.body !== undefined) d.body = str(b.body, 'body');
+      if (b.resolved !== undefined) {
+        d.resolved = !!b.resolved;
+        d.resolvedAt = d.resolved ? now() : null;
+      }
+      return { ...d };
+    });
+  }
+
+  async deleteDiscussion(id: string) {
+    await this.store.mutate((data) => {
+      const i = data.discussions.findIndex((x) => x.id === id);
+      if (i < 0) throw new HttpError(404, 'not_found', 'Discussion not found');
+      data.discussions.splice(i, 1);
+    });
+  }
+
+  addReply(id: string, b: any) {
+    const body = str(b.body, 'body');
+    return this.withDiscussion(id, (d) => {
+      const t = now();
+      d.replies.push({ id: uid(), body, author: typeof b.author === 'string' && b.author ? b.author : 'You', createdAt: t, updatedAt: t });
+      return { ...d };
+    });
+  }
+
+  updateReply(id: string, replyId: string, b: any) {
+    const body = str(b.body, 'body');
+    return this.withDiscussion(id, (d) => {
+      const r = d.replies.find((x) => x.id === replyId);
+      if (!r) throw new HttpError(404, 'not_found', 'Reply not found');
+      r.body = body; r.updatedAt = now();
+      return { ...d };
+    });
+  }
+
+  deleteReply(id: string, replyId: string) {
+    return this.withDiscussion(id, (d) => {
+      const i = d.replies.findIndex((x) => x.id === replyId);
+      if (i < 0) throw new HttpError(404, 'not_found', 'Reply not found');
+      d.replies.splice(i, 1);
+      return { ...d };
+    });
+  }
+
+  // ---- reviews ----
+  async submitReview(b: any) {
+    const scope = await this.resolveScope(b.scope);
+    const { branch } = await repoInfo(this.root);
+    const summary = typeof b.summary === 'string' ? b.summary : '';
+    return this.store.mutate((data) => {
+      const ids: string[] | undefined = Array.isArray(b.discussionIds) ? b.discussionIds : undefined;
+      const picked = data.discussions.filter((d) =>
+        d.branch === branch && d.reviewId === null && !d.resolved && (!ids || ids.includes(d.id)));
+      if (picked.length === 0 && !summary.trim()) throw new HttpError(400, 'nothing_to_submit', 'There are no pending unresolved discussions to submit');
+      const review = { id: uid(), branch, scope, summary, discussionIds: picked.map((d) => d.id), createdAt: now() };
+      for (const d of picked) d.reviewId = review.id;
+      data.reviews.push(review);
+      return review;
+    });
+  }
+
+  async export(q: { format: 'json' | 'markdown'; include?: string; reviewId?: string; unresolvedOnly?: boolean }) {
+    const info = await this.info();
+    let list = await this.listDiscussions({ reviewId: q.reviewId });
+    if (q.include === 'pending') list = list.filter((d) => d.reviewId === null);
+    else if (q.include === 'submitted') list = list.filter((d) => d.reviewId !== null);
+    if (q.unresolvedOnly) list = list.filter((d) => !d.resolved);
+    const meta = { name: info.name, branch: info.branch, scope: 'all', exportedAt: now() };
+    if (q.format === 'markdown') return { type: 'text/markdown; charset=utf-8', body: exportMarkdown(meta, list) };
+    return { type: 'application/json', body: { repository: { name: meta.name, branch: meta.branch, path: info.path }, exportedAt: meta.exportedAt, discussions: list } };
+  }
+}

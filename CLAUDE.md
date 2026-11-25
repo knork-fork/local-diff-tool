@@ -4,13 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A new project with no name, purpose or stack decided yet, currently an empty repo (only `README.md`, `.env`, `.gitignore`, an empty `docker-compose.yml`). The folder name is not the app's name.
-
-When the first real code lands, replace this paragraph with a 2-3 line summary: stack, how it runs (e.g. via `docker-compose.yml`), ports, and the current scope.
+Local Review: a local-first, GitLab-MR-style code review UI for uncommitted changes in any local git repo. React+Vite frontend (`web/`) and a Fastify+TypeScript backend (`server/`) served from ONE Docker container on `127.0.0.1:22222` (UI at `/`, REST at `/api/*`; no second port). ALL review data (discussions, reviewed files, settings) lives in this app's `data/<repo>-<hash>/review.json` (bind-mounted to `/data`, git-ignored). Reviewed repos are never written to (home is mounted read-only).
 
 ## Commands
 
-None yet. Add build/run/test/lint commands here as they appear, including any wrapper scripts and what environment they run in.
+- Start app (user does this themselves; do not run it unasked): `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build`
+- `./setup.sh` only symlinks `bin/review` to `~/.local/bin/review` (no docker). The `review [path]` launcher does NOT start Compose; it only resolves the repo root, checks `/api/health`, POSTs `/api/repositories/open`, opens the browser.
+- `npm install` (root workspaces), `npm test` (vitest, server+web), `npm run typecheck`, `npm run build`.
+- Dev without Docker: `APP_PORT=22299 ALLOWED_ROOTS=$HOME WEB_DIR=$PWD/web/dist node server/dist/index.js` after build (host Node is 18; image uses 22).
 
 ## Definition of done
 
@@ -23,7 +24,13 @@ A task is done only when:
 
 ## Architecture
 
-Nothing yet. As structure emerges, add short entries here: key files/classes, routes, env vars, data/storage conventions, and non-obvious decisions (the *why*).
+- **Gotcha**: snap Docker rewrites `$HOME` for compose, so compose uses `HOST_HOME` (default `/home/$USER`), never `$HOME`.
+- **Path mapping**: The home dir is bind-mounted read-only at the *same absolute path* inside the container so repo paths, symlinks and worktree `.git` pointers resolve identically. Other roots need an extra read-only volume + `ALLOWED_ROOTS` in `docker-compose.yml`. Repo id = base64url(repo root path) so the API is stateless across restarts.
+- `server/src/git.ts`: ALL git access (native CLI, argv arrays, `--no-optional-locks`, `--literal-pathspecs`, no fsmonitor/ext-diff). Read-only by design. Listing = one `--raw -z` + one `-U0` patch, fingerprint = sha256 of the file's patch (untracked: content hash). Per-file diff is always full context (`-U1000000`); the frontend collapses/expands and reconstructs both file sides from it for Shiki highlighting. Unborn repos use the empty-tree hash as base.
+- `server/src/store.ts`: only writer of `DATA_DIR` (lock file + temp file + atomic rename; malformed file => 500 `review_file_malformed`, never overwritten; `schemaVersion` + migrations map). `repo.ts`: business logic (scopes, reviewed invalidation, discussions, submit, export, refresh). `anchor.ts`: comment relocation by content+context; unmatched/ambiguous => `outdated`. `app.ts`: routes + Host/Origin checks (localhost only, DNS-rebinding guard) + SPA fallback.
+- Review state is keyed by `branch::scope` for reviewed files; discussions are keyed by branch and re-anchored by content against the current scope's file side on refresh. Submit only takes unsubmitted, unresolved discussions.
+- Frontend: `web/src/App.tsx` (state, only the selected file's diff is fetched), `DiffView.tsx` (custom unified/split renderer, drag on gutter "+" for multi-line comments), `rows.ts` (row building + gap collapsing), `Sidebar.tsx` (tree), `Thread.tsx`, `Dialogs.tsx`. Custom renderer + Shiki instead of Pierre/react-diff-view. Theme is a localStorage pref; view mode/scope/context live in repo settings.
+- Docker image is not verified by an automated test; Docker was not run during initial implementation (only `node server/dist/index.js` + the launcher were smoke-tested).
 
 ## Keeping this file current
 

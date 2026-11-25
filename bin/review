@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# review — open a local git repository in the Local Review app (http://localhost:22222).
+# Usage: review [path-to-repo]
+# The app itself is started separately with `docker compose up -d` in the app repo.
+set -euo pipefail
+
+PORT="${REVIEW_PORT:-22222}"
+BASE="http://localhost:${PORT}"
+
+die() { echo "review: $*" >&2; exit 1; }
+
+command -v git >/dev/null || die "git is not installed"
+command -v curl >/dev/null || die "curl is not installed"
+
+target="${1:-.}"
+[ -e "$target" ] || die "path does not exist: $target"
+[ -d "$target" ] || target="$(dirname "$target")"
+target="$(cd "$target" 2>/dev/null && pwd -P)" || die "path is not accessible: ${1:-.}"
+
+root="$(git -C "$target" rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository: $target"
+root="$(cd "$root" && pwd -P)"
+
+# The app must already be running (docker compose up -d).
+if ! curl -fsS --max-time 3 "$BASE/api/health" >/dev/null 2>&1; then
+  if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q ":${PORT} "; then
+    die "port ${PORT} is in use but ${BASE}/api/health did not respond. Is another program using it?"
+  fi
+  die "the app is not reachable at ${BASE}. Start it with: docker compose up -d (in the local-review app directory)"
+fi
+
+json_path="${root//\\/\\\\}"
+json_path="${json_path//\"/\\\"}"
+resp="$(curl -sS --max-time 20 -w '\n%{http_code}' -H 'Content-Type: application/json' \
+  -d "{\"path\":\"${json_path}\"}" "$BASE/api/repositories/open")" || die "could not reach the API at $BASE"
+code="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+if [ "$code" != "200" ]; then
+  msg="$(printf '%s' "$body" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')"
+  die "${msg:-API returned HTTP $code}"
+fi
+id="$(printf '%s' "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+[ -n "$id" ] || die "unexpected API response: $body"
+
+url="$BASE/repositories/$id"
+echo "Opening $url"
+if command -v xdg-open >/dev/null 2>&1; then xdg-open "$url" >/dev/null 2>&1 || echo "review: could not launch a browser; open $url manually" >&2
+elif command -v open >/dev/null 2>&1; then open "$url" || echo "review: could not launch a browser; open $url manually" >&2
+else echo "review: no browser launcher found; open $url manually" >&2; fi

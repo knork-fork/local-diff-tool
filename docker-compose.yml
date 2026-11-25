@@ -1,0 +1,31 @@
+# NOTE: $HOME is not used on purpose: snap-installed Docker rewrites it (to ~/snap/docker/<rev>).
+# Home defaults to /home/$USER; for another location set HOST_HOME (e.g. in .env).
+# Start with:  HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:22222:22222"
+    volumes:
+      # Mounted at the same absolute path as on the host so that repository paths, symlinks and
+      # git worktree gitdir pointers resolve identically inside the container.
+      # Repos outside home need an extra (read-only) volume here plus an entry in ALLOWED_ROOTS.
+      - "${HOST_HOME:-/home/${USER}}:${HOST_HOME:-/home/${USER}}:ro"
+      # All review data lives here (bind mount, survives rebuilds), never in the reviewed repos.
+      - "./data:/data:rw"
+    environment:
+      HOST_HOME: ${HOST_HOME:-/home/${USER}}
+      ALLOWED_ROOTS: ${HOST_HOME:-/home/${USER}}
+      APP_PORT: 22222
+      DATA_DIR: /data
+      HOME: /tmp/home
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:22222/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
