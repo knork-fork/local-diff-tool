@@ -83,6 +83,8 @@ export function buildApp(opts: { webDir?: string } = {}): FastifyInstance {
     const q = req.query;
     return { discussions: await r.listDiscussions({ file: q.file, resolved: bool(q.resolved), outdated: bool(q.outdated) }) };
   });
+  app.get<{ Params: P }>(`${R}/comment-stats`, async (req) => (await getRepo(req.params.id)).commentStats());
+  app.delete<{ Params: P }>(`${R}/comments`, async (req) => ({ cleared: await (await getRepo(req.params.id)).clearDiscussions() }));
   app.get<{ Params: P }>(`${R}/comments`, async (req) => ({ comments: await (await getRepo(req.params.id)).cliComments() }));
   app.get<{ Params: P }>(`${R}/comments/:discussionId`, async (req) => (await getRepo(req.params.id)).cliComments(req.params.discussionId!));
   app.post<{ Params: P; Body: Record<string, any> }>(`${R}/discussions`, async (req, reply) => reply.status(201).send(await (await getRepo(req.params.id)).createDiscussion(req.body ?? {})));

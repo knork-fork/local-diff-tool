@@ -91,6 +91,19 @@ describe('api', () => {
     sh(dir, 'symbolic-ref', 'HEAD', `refs/heads/${orig}`);
     expect((await app.inject({ url: `${base}/discussions`, headers: H })).json().discussions).toHaveLength(1);
 
+    // clear only affects the current branch
+    const stats = (await app.inject({ url: `${base}/comment-stats`, headers: H })).json();
+    expect(stats.count).toBe(1);
+    expect(typeof stats.oldestCreatedAt).toBe('string');
+    sh(dir, 'symbolic-ref', 'HEAD', 'refs/heads/feature/x');
+    expect((await app.inject({ method: 'DELETE', url: `${base}/comments`, headers: H })).json().cleared).toBe(0);
+    sh(dir, 'symbolic-ref', 'HEAD', `refs/heads/${orig}`);
+    expect((await app.inject({ url: `${base}/discussions`, headers: H })).json().discussions).toHaveLength(1);
+    expect((await app.inject({ method: 'DELETE', url: `${base}/comments`, headers: H })).json().cleared).toBe(1);
+    expect((await app.inject({ url: `${base}/discussions`, headers: H })).json().discussions).toHaveLength(0);
+    // restore a discussion for the remaining assertions
+    await app.inject({ method: 'POST', url: `${base}/discussions`, headers: H, payload: { path: 'a.txt', side: 'new', startLine: 1, body: 'again' } });
+
     // staged scope + commit-less repo
     sh(dir, 'add', 'a.txt');
     const st = (await app.inject({ url: `${base}/files?scope=staged`, headers: H })).json();

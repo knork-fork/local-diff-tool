@@ -234,6 +234,23 @@ export class Repo {
     });
   }
 
+  /** Branch + comment count + oldest comment time, for the CLI's stale-comment prompt. */
+  async commentStats() {
+    const { branch } = await repoInfo(this.root);
+    const ds = (await (await this.store()).read()).discussions;
+    const oldest = ds.map((d) => d.createdAt).sort()[0] ?? null;
+    return { branch, count: ds.length, oldestCreatedAt: oldest };
+  }
+
+  /** Removes every discussion of the current branch only (other branches/repos have their own files). */
+  async clearDiscussions() {
+    return (await this.store()).mutate((data) => {
+      const n = data.discussions.length;
+      data.discussions = [];
+      return n;
+    });
+  }
+
   async deleteDiscussion(id: string) {
     await (await this.store()).mutate((data) => {
       const i = data.discussions.findIndex((x) => x.id === id);
