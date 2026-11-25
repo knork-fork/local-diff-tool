@@ -74,6 +74,12 @@ describe('api', () => {
     expect(ref.totals.reviewed).toBe(0);
     const d = (await app.inject({ url: `${base}/discussions`, headers: H })).json().discussions[0];
     expect([d.startLine, d.outdated]).toEqual([3, false]);
+    const cl = (await app.inject({ url: `${base}/comments`, headers: H })).json().comments;
+    expect([cl[0].file, cl[0].line, cl[0].replies.length]).toEqual([path.join(dir, 'a.txt'), 3, 1]);
+    await app.inject({ method: 'PATCH', url: `${base}/discussions/${did}`, headers: H, payload: { resolved: true } });
+    expect((await app.inject({ url: `${base}/comments`, headers: H })).json().comments).toHaveLength(0);
+    expect((await app.inject({ url: `${base}/comments/${did}`, headers: H })).json().resolved).toBe(true);
+    await app.inject({ method: 'PATCH', url: `${base}/discussions/${did}`, headers: H, payload: { resolved: false } });
     fs.writeFileSync(path.join(dir, 'a.txt'), 'zero\none\nTWO\nthree\n');
     await app.inject({ method: 'POST', url: `${base}/refresh`, headers: H, payload: {} });
     expect((await app.inject({ url: `${base}/discussions?outdated=true`, headers: H })).json().discussions).toHaveLength(1);

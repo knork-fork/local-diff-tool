@@ -23,7 +23,7 @@ async function getRepo(id: string): Promise<Repo> {
 const bool = (v: unknown): boolean | undefined => (v === undefined || v === '' ? undefined : v === 'true' || v === '1');
 
 export function buildApp(opts: { webDir?: string } = {}): FastifyInstance {
-  const app = Fastify({ logger: process.env.NODE_ENV !== 'test' && { level: 'info' }, bodyLimit: 2 * 1024 * 1024 });
+  const app = Fastify({ logger: process.env.NODE_ENV !== 'test' && { level: 'info' }, bodyLimit: 2 * 1024 * 1024, maxParamLength: 2048 });
 
   // DNS-rebinding / cross-site protection for a service with no auth.
   app.addHook('onRequest', async (req) => {
@@ -83,6 +83,8 @@ export function buildApp(opts: { webDir?: string } = {}): FastifyInstance {
     const q = req.query;
     return { discussions: await r.listDiscussions({ file: q.file, resolved: bool(q.resolved), outdated: bool(q.outdated) }) };
   });
+  app.get<{ Params: P }>(`${R}/comments`, async (req) => ({ comments: await (await getRepo(req.params.id)).cliComments() }));
+  app.get<{ Params: P }>(`${R}/comments/:discussionId`, async (req) => (await getRepo(req.params.id)).cliComments(req.params.discussionId!));
   app.post<{ Params: P; Body: Record<string, any> }>(`${R}/discussions`, async (req, reply) => reply.status(201).send(await (await getRepo(req.params.id)).createDiscussion(req.body ?? {})));
   app.patch<{ Params: P; Body: Record<string, any> }>(`${R}/discussions/:discussionId`, async (req) => (await getRepo(req.params.id)).updateDiscussion(req.params.discussionId!, req.body ?? {}));
   app.delete<{ Params: P }>(`${R}/discussions/:discussionId`, async (req, reply) => {

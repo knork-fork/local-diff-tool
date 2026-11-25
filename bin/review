@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # review — open a local git repository in the Local Review app (http://localhost:22222).
-# Usage: review [path-to-repo]
+# Usage: review [path-to-repo] [list-comments | list-comment <comment-id>]
 # The app itself is started separately with `docker compose up -d` in the app repo.
 set -euo pipefail
 
@@ -12,7 +12,15 @@ die() { echo "review: $*" >&2; exit 1; }
 command -v git >/dev/null || die "git is not installed"
 command -v curl >/dev/null || die "curl is not installed"
 
-target="${1:-.}"
+target="."
+if [ $# -gt 0 ] && [ "$1" != list-comments ] && [ "$1" != list-comment ]; then target="$1"; shift; fi
+cmd="${1:-}"
+case "$cmd" in
+  ""|list-comments) ;;
+  list-comment) [ -n "${2:-}" ] || die "usage: review [path] list-comment <comment-id>" ;;
+  *) die "unknown command: $cmd (expected list-comments or list-comment <id>)" ;;
+esac
+[ -z "$cmd" ] || command -v jq >/dev/null || die "jq is required for $cmd"
 [ -e "$target" ] || die "path does not exist: $target"
 [ -d "$target" ] || target="$(dirname "$target")"
 target="$(cd "$target" 2>/dev/null && pwd -P)" || die "path is not accessible: ${1:-.}"
@@ -40,6 +48,16 @@ if [ "$code" != "200" ]; then
 fi
 id="$(printf '%s' "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$id" ] || die "unexpected API response: $body"
+
+if [ -n "$cmd" ]; then
+  fmt='"\(.file):\(.line)\(if .resolved then " [resolved]" else "" end)\(if .outdated then " [outdated]" else "" end)\n  \(.author): \(.body | gsub("\n"; "\n  "))\(.replies | map("\n  \(.author): \(.body | gsub("\n"; "\n  "))") | join(""))"'
+  if [ "$cmd" = list-comments ]; then ep="comments"; sel=".comments[]"; else ep="comments/$2"; sel="."; fi
+  out="$(curl -sS --max-time 60 -w '\n%{http_code}' "$BASE/api/repositories/$id/$ep")" || die "could not reach the API at $BASE"
+  code="${out##*$'\n'}"; out="${out%$'\n'*}"
+  [ "$code" = 200 ] || die "$(printf '%s' "$out" | jq -r '.error.message // empty' 2>/dev/null || true)${out:+ (HTTP $code)}"
+  printf '%s' "$out" | jq -r "$sel | $fmt"
+  exit 0
+fi
 
 url="$BASE/repositories/$id"
 echo "Opening $url"

@@ -170,6 +170,25 @@ export class Repo {
       (f.outdated === undefined || d.outdated === f.outdated));
   }
 
+  /** CLI view of a thread: absolute file + the line the UI shows it at (endLine on its side). */
+  private cliComment(d: Discussion) {
+    return {
+      id: d.id, file: path.join(this.root, d.path), path: d.path, line: d.endLine, startLine: d.startLine, side: d.side,
+      resolved: d.resolved, outdated: d.outdated, body: d.body, author: d.author, createdAt: d.createdAt,
+      replies: d.replies.map((r) => ({ id: r.id, body: r.body, author: r.author, createdAt: r.createdAt })),
+    };
+  }
+
+  /** Re-anchors first so lines match what the UI shows after a refresh. */
+  async cliComments(id?: string) {
+    await this.refresh(await this.resolveScope(undefined));
+    const all = await this.listDiscussions();
+    if (id === undefined) return all.filter((d) => !d.resolved).map((d) => this.cliComment(d));
+    const d = all.find((x) => x.id === id);
+    if (!d) throw new HttpError(404, 'not_found', 'Discussion not found');
+    return this.cliComment(d);
+  }
+
   async createDiscussion(b: any): Promise<Discussion> {
     const scope = await this.resolveScope(b.scope);
     const rel = safeRelPath(b.path);
