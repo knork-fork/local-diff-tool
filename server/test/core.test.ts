@@ -120,6 +120,20 @@ describe('api', () => {
     expect(fs.readFileSync(file, 'utf8')).toBe('{oops');
   });
 
+  it('unreviews a file modified on disk after it was reviewed', async () => {
+    const app = buildApp(); const H = { host: 'localhost' };
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
+    const id = (await app.inject({ method: 'POST', url: '/api/repositories/open', headers: H, payload: { path: dir } })).json().id;
+    const base = `/api/repositories/${id}`;
+    await app.inject({ method: 'PUT', url: `${base}/files/reviewed`, headers: H, payload: { path: 'a.txt', reviewed: true } });
+    expect((await app.inject({ url: `${base}/files`, headers: H })).json().files[0].reviewed).toBe(true);
+    const future = new Date(Date.now() + 60_000);
+    fs.utimesSync(path.join(dir, 'a.txt'), future, future);
+    expect((await app.inject({ url: `${base}/files`, headers: H })).json().files[0].reviewed).toBe(false);
+    const r = (await app.inject({ method: 'POST', url: `${base}/refresh`, headers: H, payload: {} })).json();
+    expect(r.refresh.invalidated).toEqual(['a.txt']);
+  });
+
   it('rejects foreign hosts and traversal', async () => {
     const app = buildApp();
     expect((await app.inject({ url: '/api/health', headers: { host: 'evil.com' } })).statusCode).toBe(403);

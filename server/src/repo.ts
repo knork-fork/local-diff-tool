@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { makeAnchor, relocate } from './anchor.js';
 import { parsePatch } from './diffparse.js';
@@ -55,14 +56,25 @@ export class Repo {
 
   async resolveScope(v: unknown) { return parseScope(v, await this.scopeFallback()); }
 
-  private decorate(data: ReviewData, branch: string, scope: Scope, files: ChangedFile[]) {
+  /** Reviewed paths whose file on disk was modified after they were marked reviewed (deleted files have no mtime: skipped). */
+  private async modifiedSinceReview(reviewed: Record<string, { reviewedAt: string }>): Promise<Set<string>> {
+    const out = new Set<string>();
+    await Promise.all(Object.entries(reviewed).map(async ([p, e]) => {
+      try {
+        if ((await fs.lstat(path.join(this.root, p))).mtimeMs > Date.parse(e.reviewedAt)) out.add(p);
+      } catch { /* missing on disk */ }
+    }));
+    return out;
+  }
+
+  private decorate(data: ReviewData, branch: string, scope: Scope, files: ChangedFile[], stale: Set<string> = new Set()) {
     const reviewed = data.reviewedFiles[scopeKey(branch, scope)] ?? {};
     const mine = data.discussions.filter((d) => d.branch === branch);
     const out = files.map((f) => {
       const ds = mine.filter((d) => d.path === f.path);
       return {
         ...f,
-        reviewed: reviewed[f.path]?.fingerprint === f.fingerprint,
+        reviewed: reviewed[f.path]?.fingerprint === f.fingerprint && !stale.has(f.path),
         discussionCount: ds.length,
         unresolvedCount: ds.filter((d) => !d.resolved).length,
       };
@@ -82,7 +94,8 @@ export class Repo {
 
   async files(scope: Scope) {
     const [{ branch }, files, data] = await Promise.all([repoInfo(this.root), listChanges(this.root, scope), this.store().then((s) => s.read())]);
-    return this.decorate(data, branch, scope, files);
+    const stale = await this.modifiedSinceReview(data.reviewedFiles[scopeKey(branch, scope)] ?? {});
+    return this.decorate(data, branch, scope, files, stale);
   }
 
   async diff(scope: Scope, rel: string, oldPath: string | null) {
@@ -108,8 +121,9 @@ export class Repo {
       const key = scopeKey(branch, scope);
       const reviewed = d.reviewedFiles[key] ?? {};
       const byPath = new Map(files.map((f) => [f.path, f]));
+      const stale = await this.modifiedSinceReview(reviewed);
       for (const [p, entry] of Object.entries(reviewed)) {
-        if (byPath.get(p)?.fingerprint !== entry.fingerprint) { delete reviewed[p]; report.invalidated.push(p); }
+        if (byPath.get(p)?.fingerprint !== entry.fingerprint || stale.has(p)) { delete reviewed[p]; report.invalidated.push(p); }
       }
       d.reviewedFiles[key] = reviewed;
       const cache = new Map<string, string[] | null>();
