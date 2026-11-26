@@ -26,6 +26,8 @@ review
 
 This opens the review UI for that repo in your browser. You can also pass a path: `review /absolute/path/to/repo`.
 
+When a file you marked as reviewed changes again, it becomes unreviewed and the lines changed since your review are labelled NEW in the diff. Lines you had seen that no longer exist are shown struck through and labelled REMOVED, until you mark the file reviewed again.
+
 ## Usage with Claude
 
 1. Run `review` in the terminal (inside the repo).

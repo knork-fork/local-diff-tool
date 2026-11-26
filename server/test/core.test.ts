@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { makeAnchor, relocate } from '../src/anchor.js';
-import { parsePatch } from '../src/diffparse.js';
+import { markNewLines, parsePatch } from '../src/diffparse.js';
 import { buildApp } from '../src/app.js';
 
 const sh = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, stdio: 'pipe' }).toString();
@@ -160,5 +160,40 @@ describe('api', () => {
     expect(f[0]).toMatchObject({ path: 'b.txt', oldPath: 'a.txt', status: 'renamed', additions: 1 });
     const d = (await app.inject({ url: `${base}/diff?scope=all&path=b.txt&oldPath=a.txt`, headers: H })).json();
     expect(d.status).toBe('renamed');
+  });
+});
+
+describe('diff cache / NEW markers', () => {
+  it('marks lines added since last review, resets on re-review, clears when file leaves the diff', async () => {
+    const app = buildApp();
+    const H = { host: 'localhost:22222' };
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\n');
+    const id = (await app.inject({ method: 'POST', url: '/api/repositories/open', headers: H, payload: { path: dir } })).json().id;
+    const base = `/api/repositories/${id}`;
+    const diff = async () => (await app.inject({ url: `${base}/diff?path=a.txt`, headers: H })).json();
+    const newTexts = (d: any) => d.hunks.flatMap((h: any) => h.lines).filter((l: any) => l.isNew).map((l: any) => l.text);
+    expect(newTexts(await diff())).toEqual([]); // first view = baseline
+    await app.inject({ method: 'PUT', url: `${base}/files/reviewed`, headers: H, payload: { path: 'a.txt', reviewed: true } });
+    await new Promise((r) => setTimeout(r, 20));
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\nthree\n');
+    expect(newTexts(await diff())).toEqual(['three']);
+    await app.inject({ method: 'PUT', url: `${base}/files/reviewed`, headers: H, payload: { path: 'a.txt', reviewed: true } });
+    expect(newTexts(await diff())).toEqual([]);
+    fs.rmSync(path.join(dir, 'a.txt'));
+    await app.inject({ url: `${base}/files`, headers: H });
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'x\n');
+    expect(newTexts(await diff())).toEqual([]); // old baseline was dropped, new baseline taken
+  });
+});
+
+describe('markNewLines', () => {
+  const patch = (body: string) => `diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,1 +1,4 @@\n${body}`;
+  it('flags new lines and keeps removed baseline lines as ghosts at their position', () => {
+    const cached = patch(' a\n+b\n+c\n d\n');
+    const cur = parsePatch(patch(' a\n+c\n+e\n d\n')).hunks;
+    markNewLines(cur, cached);
+    const ls = cur[0].lines;
+    expect(ls.map((l) => !!l.isNew)).toEqual([false, false, true, false]);
+    expect(ls[1].removedBefore).toEqual([{ type: 'add', text: 'b' }]);
   });
 });

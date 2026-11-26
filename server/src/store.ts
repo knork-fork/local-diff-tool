@@ -46,6 +46,55 @@ export class ReviewStore {
     return d;
   }
 
+  /**
+   * Diff cache (baselines for NEW markers) is deliberately NOT part of review.json:
+   * <dir>/diff-cache/index.json = { scopeKey: [paths] } and <dir>/diff-cache/<hash(scopeKey)>/<hash(path)>.patch.
+   */
+  private get cacheDir() { return path.join(this.dir, 'diff-cache'); }
+  private patchFile(key: string, rel: string) {
+    const h = (x: string) => crypto.createHash('sha1').update(x).digest('hex');
+    return path.join(this.cacheDir, h(key).slice(0, 16), h(rel) + '.patch');
+  }
+  private async atomicWrite(f: string, text: string) {
+    await fs.mkdir(path.dirname(f), { recursive: true });
+    const tmp = `${f}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+    await fs.writeFile(tmp, text);
+    await fs.rename(tmp, f);
+  }
+
+  private async readIndex(): Promise<Record<string, string[]>> {
+    try { return JSON.parse(await fs.readFile(path.join(this.cacheDir, 'index.json'), 'utf8')); } catch { return {}; }
+  }
+
+  /** Serialised (in-process) read-modify-write of the cache index. */
+  private editIndex<T>(fn: (idx: Record<string, string[]>) => T): Promise<T> {
+    const qk = path.join(this.cacheDir, 'index.json');
+    const run = (queues.get(qk) ?? Promise.resolve()).catch(() => {}).then(async () => {
+      const idx = await this.readIndex();
+      const r = fn(idx);
+      await this.atomicWrite(qk, JSON.stringify(idx));
+      return r;
+    });
+    queues.set(qk, run);
+    return run;
+  }
+
+  async cachedPaths(key: string): Promise<string[]> { return (await this.readIndex())[key] ?? []; }
+
+  async readPatch(key: string, rel: string): Promise<string | null> {
+    try { return await fs.readFile(this.patchFile(key, rel), 'utf8'); } catch { return null; }
+  }
+
+  async writePatch(key: string, rel: string, patch: string) {
+    await this.atomicWrite(this.patchFile(key, rel), patch);
+    await this.editIndex((idx) => { const l = (idx[key] ??= []); if (!l.includes(rel)) l.push(rel); });
+  }
+
+  async deletePatch(key: string, rel: string) {
+    await fs.rm(this.patchFile(key, rel), { force: true });
+    await this.editIndex((idx) => { idx[key] = (idx[key] ?? []).filter((p) => p !== rel); });
+  }
+
   async ensureDir() {
     try {
       const st = await fs.lstat(this.dir);
@@ -86,6 +135,7 @@ export class ReviewStore {
       if (!m) throw new HttpError(500, 'review_file_unsupported', `No migration from schema ${data.schemaVersion}`);
       data = m(data);
     }
+    delete data.diffCache; // legacy: the cache used to live here
     return { ...defaultData(), ...data, settings: { ...defaultData().settings, ...data.settings } };
   }
 

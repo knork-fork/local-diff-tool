@@ -1,7 +1,7 @@
-import type { DiffLine, Hunk } from './types';
+import type { DiffLine, Ghost, Hunk } from './types';
 
-export interface Cell { num: number; text: string; type: 'ctx' | 'add' | 'del' }
-export interface SRow { left: Cell | null; right: Cell | null }
+export interface Cell { num: number; text: string; type: 'ctx' | 'add' | 'del'; isNew?: boolean }
+export interface SRow { left: Cell | null; right: Cell | null; before?: Ghost[]; after?: Ghost[] }
 
 export const unifiedRows = (hunks: Hunk[]): DiffLine[] => hunks.flatMap((h) => h.lines);
 
@@ -12,11 +12,16 @@ export function splitRows(hunks: Hunk[]): SRow[] {
     let adds: DiffLine[] = [];
     const flush = () => {
       const n = Math.max(dels.length, adds.length);
+      const group = [...dels, ...adds];
+      const before = group.flatMap((l) => l.removedBefore ?? []);
+      const after = group.flatMap((l) => l.removedAfter ?? []);
       for (let i = 0; i < n; i++) {
         const d = dels[i]; const a = adds[i];
         rows.push({
-          left: d ? { num: d.oldNumber!, text: d.text, type: 'del' } : null,
-          right: a ? { num: a.newNumber!, text: a.text, type: 'add' } : null,
+          before: i === 0 && before.length ? before : undefined,
+          after: i === n - 1 && after.length ? after : undefined,
+          left: d ? { num: d.oldNumber!, text: d.text, type: 'del', isNew: d.isNew } : null,
+          right: a ? { num: a.newNumber!, text: a.text, type: 'add', isNew: a.isNew } : null,
         });
       }
       dels = []; adds = [];
@@ -26,7 +31,7 @@ export function splitRows(hunks: Hunk[]): SRow[] {
       else if (l.type === 'add') adds.push(l);
       else {
         flush();
-        rows.push({ left: { num: l.oldNumber!, text: l.text, type: 'ctx' }, right: { num: l.newNumber!, text: l.text, type: 'ctx' } });
+        rows.push({ left: { num: l.oldNumber!, text: l.text, type: 'ctx' }, right: { num: l.newNumber!, text: l.text, type: 'ctx' }, before: l.removedBefore, after: l.removedAfter });
       }
     }
     flush();

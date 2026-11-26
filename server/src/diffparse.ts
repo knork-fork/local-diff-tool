@@ -5,6 +5,10 @@ export interface DiffLine {
   newNumber: number | null;
   text: string;
   noEol?: boolean;
+  isNew?: boolean;
+  /** Changed lines of the cached baseline that are gone now, shown just before / after this line. */
+  removedBefore?: { type: 'add' | 'del'; text: string }[];
+  removedAfter?: { type: 'add' | 'del'; text: string }[];
 }
 export interface Hunk {
   header: string;
@@ -98,4 +102,55 @@ export function parsePatch(text: string): ParsedPatch {
     res.hunks.push(hunk);
   }
   return res;
+}
+
+const MAX_CELLS = 4_000_000;
+
+/**
+ * Compares the current patch with the cached baseline: marks changed lines that are not in the baseline (`isNew`)
+ * and attaches changed baseline lines that no longer exist (`removedBefore` / `removedAfter`) at their position.
+ */
+export function markNewLines(current: Hunk[], cachedPatch: string): void {
+  const seen = new Map<string, number>();
+  const cachedLines = parsePatch(cachedPatch).hunks.flatMap((h) => h.lines);
+  for (const l of cachedLines) {
+    if (l.type === 'ctx') continue;
+    const k = l.type + l.text;
+    seen.set(k, (seen.get(k) ?? 0) + 1);
+  }
+  const cur = current.flatMap((h) => h.lines);
+  for (const l of cur) {
+    if (l.type === 'ctx') continue;
+    const k = l.type + l.text;
+    const n = seen.get(k) ?? 0;
+    if (n > 0) seen.set(k, n - 1); else l.isNew = true;
+  }
+  // Removed lines: align the two full-context sequences (trim common ends, LCS on the middle).
+  const key = (l: DiffLine) => l.type + l.text;
+  const a = cachedLines.map(key); const b = cur.map(key);
+  let pre = 0;
+  while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
+  let suf = 0;
+  while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
+  const n = a.length - pre - suf; const m = b.length - pre - suf;
+  if (n === 0 || (n + 1) * (m + 1) > MAX_CELLS) return;
+  const w = m + 1;
+  const dp = new Uint32Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) {
+    dp[i * w + j] = a[pre + i] === b[pre + j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+  }
+  let i = 0; let j = 0;
+  const ghost = (l: DiffLine, at: number) => {
+    if (l.type === 'ctx') return;
+    const g = { type: l.type, text: l.text };
+    const target = cur[at];
+    if (target) (target.removedBefore ??= []).push(g);
+    else if (cur.length) (cur[cur.length - 1].removedAfter ??= []).push(g);
+  };
+  while (i < n && j < m) {
+    if (a[pre + i] === b[pre + j]) { i++; j++; }
+    else if (dp[(i + 1) * w + j] >= dp[i * w + j + 1]) { ghost(cachedLines[pre + i], pre + j); i++; }
+    else j++;
+  }
+  while (i < n) { ghost(cachedLines[pre + i], pre + j); i++; }
 }

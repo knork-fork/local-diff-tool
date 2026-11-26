@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { makeAnchor, relocate } from './anchor.js';
-import { parsePatch } from './diffparse.js';
+import { markNewLines, parsePatch } from './diffparse.js';
 import { filePatch, listChanges, readSide, repoInfo } from './git.js';
 import { repoIdFor, safeRelPath } from './paths.js';
 import { ReviewStore } from './store.js';
@@ -95,7 +95,28 @@ export class Repo {
   async files(scope: Scope) {
     const [{ branch }, files, data] = await Promise.all([repoInfo(this.root), listChanges(this.root, scope), this.store().then((s) => s.read())]);
     const stale = await this.modifiedSinceReview(data.reviewedFiles[scopeKey(branch, scope)] ?? {});
+    await this.syncCache(scope, files);
     return this.decorate(data, branch, scope, files, stale);
+  }
+
+  /**
+   * Caches the whole current diff: every listed file without a baseline gets one (first sight), and baselines of
+   * files that are no longer in the diff are dropped. Existing baselines are only replaced on mark-reviewed.
+   */
+  private async syncCache(scope: Scope, files: ChangedFile[]) {
+    const { branch } = await repoInfo(this.root);
+    const key = scopeKey(branch, scope);
+    const store = await this.store();
+    const cached = new Set(await store.cachedPaths(key));
+    const present = new Set(files.map((f) => f.path));
+    const missing = files.filter((f) => !cached.has(f.path));
+    for (const p of cached) if (!present.has(p)) await store.deletePatch(key, p);
+    for (let i = 0; i < missing.length; i += 8) {
+      await Promise.all(missing.slice(i, i + 8).map(async (f) => {
+        const r = await filePatch(this.root, scope, f.path, f.oldPath);
+        if (r) await store.writePatch(key, f.path, r.patch);
+      }));
+    }
   }
 
   async diff(scope: Scope, rel: string, oldPath: string | null) {
@@ -104,6 +125,9 @@ export class Repo {
     const res = await filePatch(this.root, scope, rel, oldPath);
     if (!res) throw new HttpError(404, 'no_changes', `No changes for ${rel} in scope ${scope}`);
     const p = parsePatch(res.patch);
+    const { branch } = await repoInfo(this.root);
+    const cached = await (await this.store()).readPatch(scopeKey(branch, scope), rel);
+    if (cached !== null && cached !== res.patch) markNewLines(p.hunks, cached);
     return {
       path: rel, oldPath: p.oldPath ?? (oldPath && oldPath !== rel ? oldPath : null), scope,
       status: p.isNew ? 'added' : p.isDeleted ? 'deleted' : p.isRename ? 'renamed' : 'modified',
@@ -115,6 +139,7 @@ export class Repo {
   async refresh(scope: Scope) {
     const { branch } = await repoInfo(this.root);
     const files = await listChanges(this.root, scope);
+    await this.syncCache(scope, files);
     const oldPathOf = new Map(files.filter((f) => f.oldPath).map((f) => [f.path, f.oldPath!]));
     const report = { invalidated: [] as string[], outdated: [] as string[], relocated: [] as string[], reopened: [] as string[] };
     const data = await (await this.store()).mutate(async (d) => {
@@ -149,11 +174,15 @@ export class Repo {
     const files = await listChanges(this.root, scope);
     const f = files.find((x) => x.path === rel);
     if (!f) throw new HttpError(404, 'no_changes', `${rel} has no changes in scope ${scope}`);
-    await (await this.store()).mutate((d) => {
+    const patch = reviewed ? (await filePatch(this.root, scope, rel, f.oldPath))?.patch : undefined;
+    const st = await this.store();
+    if (patch !== undefined) await st.writePatch(scopeKey(branch, scope), rel, patch);
+    await st.mutate((d) => {
       const key = scopeKey(branch, scope);
       d.reviewedFiles[key] ??= {};
-      if (reviewed) d.reviewedFiles[key][rel] = { fingerprint: f.fingerprint, reviewedAt: now() };
-      else delete d.reviewedFiles[key][rel];
+      if (reviewed) {
+        d.reviewedFiles[key][rel] = { fingerprint: f.fingerprint, reviewedAt: now() };
+      } else delete d.reviewedFiles[key][rel];
     });
     return this.files(scope);
   }
@@ -161,11 +190,17 @@ export class Repo {
   async setAllReviewed(scope: Scope, reviewed: boolean) {
     const { branch } = await repoInfo(this.root);
     const files = await listChanges(this.root, scope);
-    await (await this.store()).mutate((d) => {
+    const patches = new Map<string, string>();
+    if (reviewed) await Promise.all(files.map(async (f) => { const r = await filePatch(this.root, scope, f.path, f.oldPath); if (r) patches.set(f.path, r.patch); }));
+    const st = await this.store();
+    for (const [p, patch] of patches) await st.writePatch(scopeKey(branch, scope), p, patch);
+    await st.mutate((d) => {
       const key = scopeKey(branch, scope);
       d.reviewedFiles[key] ??= {};
       for (const f of files) {
-        if (reviewed) d.reviewedFiles[key][f.path] = { fingerprint: f.fingerprint, reviewedAt: now() };
+        if (reviewed) {
+          d.reviewedFiles[key][f.path] = { fingerprint: f.fingerprint, reviewedAt: now() };
+        }
         else delete d.reviewedFiles[key][f.path];
       }
     });

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { highlight, type Tok } from './highlight';
 import { collapse, splitRows, unifiedRows, type Expansion, type SRow } from './rows';
 import { CommentForm, Thread, type Actions } from './Thread';
-import type { DiffLine, Discussion, FileDiff, Side, ViewMode } from './types';
+import type { DiffLine, Discussion, Ghost, FileDiff, Side, ViewMode } from './types';
 
 const STEP = 20;
 type Sel = { side: Side; start: number; end: number };
@@ -67,11 +67,12 @@ export function DiffView({ diff, discussions, viewMode, contextLines, showAll, a
     return !!s && s.side === side && n >= s.start && n <= s.end;
   };
 
-  const numCell = (side: Side, n: number | null | undefined, cls: string, canComment: boolean) => (
+  const numCell = (side: Side, n: number | null | undefined, cls: string, canComment: boolean, isNew = false) => (
     <td
       className={`num ${cls}`}
       onMouseEnter={() => { if (drag && drag.side === side && n != null) setDrag({ ...drag, current: n }); }}
     >
+      {isNew && <span className="new-badge">NEW</span>}
       {canComment && n != null && (
         <button className="add-comment" title="Add a comment (drag to select multiple lines)"
           onMouseDown={(e) => { e.preventDefault(); setDrag({ side, anchor: n, current: n }); }}>+</button>
@@ -97,6 +98,13 @@ export function DiffView({ diff, discussions, viewMode, contextLines, showAll, a
     );
   };
 
+  const ghostRows = (gs: Ghost[] | undefined, cols: number, k: string) => gs?.map((g, i) => (
+    <tr key={`${k}-g${i}`} className="line ghost">
+      <td className="num"><span className="removed-badge">REMOVED</span></td>
+      <td className="code" colSpan={cols - 1}><span className="sign">{g.type === 'add' ? '+' : '−'}</span>{g.text || ' '}</td>
+    </tr>
+  ));
+
   const gapRow = (g: { id: number; count: number; canUp: boolean; canDown: boolean }, cols: number) => {
     const bump = (k: 'top' | 'bottom') => setExpansion((e) => {
       const cur = e[g.id] ?? { top: 0, bottom: 0 };
@@ -116,8 +124,8 @@ export function DiffView({ diff, discussions, viewMode, contextLines, showAll, a
     );
   };
 
-  const uItems = useMemo(() => viewMode === 'unified' ? collapse(uRows, (r) => r.type !== 'ctx' || hasThread(keysU(r)), contextLines, expansion, showAll) : [], [viewMode, uRows, contextLines, expansion, showAll, threadsByKey, form]);
-  const sItems = useMemo(() => viewMode === 'split' ? collapse(sRows, (r) => r.left?.type === 'del' || r.right?.type === 'add' || hasThread(keysS(r)), contextLines, expansion, showAll) : [], [viewMode, sRows, contextLines, expansion, showAll, threadsByKey, form]);
+  const uItems = useMemo(() => viewMode === 'unified' ? collapse(uRows, (r) => r.type !== 'ctx' || !!r.removedBefore || !!r.removedAfter || hasThread(keysU(r)), contextLines, expansion, showAll) : [], [viewMode, uRows, contextLines, expansion, showAll, threadsByKey, form]);
+  const sItems = useMemo(() => viewMode === 'split' ? collapse(sRows, (r) => r.left?.type === 'del' || r.right?.type === 'add' || !!r.before || !!r.after || hasThread(keysS(r)), contextLines, expansion, showAll) : [], [viewMode, sRows, contextLines, expansion, showAll, threadsByKey, form]);
 
   if (diff.binary) {
     return <div className="binary-note">Binary file — {diff.status}. A textual diff is not available.</div>;
@@ -146,12 +154,14 @@ export function DiffView({ diff, discussions, viewMode, contextLines, showAll, a
                 const toks = r.type === 'del' ? oldToks?.[r.oldNumber! - 1] : newToks?.[r.newNumber! - 1];
                 return (
                   <Fragment key={it.index}>
+                    {ghostRows(r.removedBefore, 3, `u${it.index}b`)}
                     <tr className={`line ${r.type}${sel ? ' selected' : ''}`}>
-                      {numCell('old', r.oldNumber, 'old', r.type === 'del')}
+                      {numCell('old', r.oldNumber, 'old', r.type === 'del', !!r.isNew)}
                       {numCell('new', r.newNumber, 'new', r.type !== 'del')}
                       <td className="code"><span className="sign">{r.type === 'add' ? '+' : r.type === 'del' ? '−' : ' '}</span><Code text={r.text} toks={toks} />{r.noEol && <span className="noeol"> ⏎̸</span>}</td>
                     </tr>
                     {hasThread(keysU(r)) && <tr className="thread-row"><td colSpan={3}>{threadBlock(keysU(r))}</td></tr>}
+                    {ghostRows(r.removedAfter, 3, `u${it.index}a`)}
                   </Fragment>
                 );
               })}
@@ -169,8 +179,9 @@ export function DiffView({ diff, discussions, viewMode, contextLines, showAll, a
                 const rt = r ? newToks?.[r.num - 1] : undefined;
                 return (
                   <Fragment key={it.index}>
+                    {ghostRows(it.row.before, 4, `s${it.index}b`)}
                     <tr className="line">
-                      {numCell('old', l?.num, `${l?.type ?? 'empty'}`, !!l)}
+                      {numCell('old', l?.num, `${l?.type ?? 'empty'}`, !!l, !!(l?.isNew || r?.isNew))}
                       <td className={`code ${l?.type ?? 'empty'}${inSel('old', l?.num) ? ' selected' : ''}`}>{l && <><span className="sign">{l.type === 'del' ? '−' : ' '}</span><Code text={l.text} toks={lt} /></>}</td>
                       {numCell('new', r?.num, `${r?.type ?? 'empty'}`, !!r)}
                       <td className={`code ${r?.type ?? 'empty'}${inSel('new', r?.num) ? ' selected' : ''}`}>{r && <><span className="sign">{r.type === 'add' ? '+' : ' '}</span><Code text={r.text} toks={rt} /></>}</td>
@@ -181,6 +192,7 @@ export function DiffView({ diff, discussions, viewMode, contextLines, showAll, a
                         <td colSpan={2}>{threadBlock(keys, 'new')}</td>
                       </tr>
                     )}
+                    {ghostRows(it.row.after, 4, `s${it.index}a`)}
                   </Fragment>
                 );
               })}
