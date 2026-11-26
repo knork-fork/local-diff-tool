@@ -177,8 +177,10 @@ describe('diff cache / NEW markers', () => {
     await new Promise((r) => setTimeout(r, 20));
     fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\nthree\n');
     expect(newTexts(await diff())).toEqual(['three']);
+    expect((await diff()).sinceReview).toBe(true);
     await app.inject({ method: 'PUT', url: `${base}/files/reviewed`, headers: H, payload: { path: 'a.txt', reviewed: true } });
     expect(newTexts(await diff())).toEqual([]);
+    expect((await diff()).sinceReview).toBe(false);
     fs.rmSync(path.join(dir, 'a.txt'));
     await app.inject({ url: `${base}/files`, headers: H });
     fs.writeFileSync(path.join(dir, 'a.txt'), 'x\n');

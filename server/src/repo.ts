@@ -116,11 +116,15 @@ export class Repo {
     const p = parsePatch(res.patch);
     const { branch } = await repoInfo(this.root);
     const cached = await (await this.store()).readPatch(scopeKey(branch, scope), rel);
-    if (cached !== null && cached !== res.patch) markNewLines(p.hunks, cached);
+    let sinceReview = false;
+    if (cached !== null && cached !== res.patch) {
+      markNewLines(p.hunks, cached);
+      sinceReview = p.hunks.some((h) => h.lines.some((l) => l.isNew || l.removedBefore || l.removedAfter));
+    }
     return {
       path: rel, oldPath: p.oldPath ?? (oldPath && oldPath !== rel ? oldPath : null), scope,
       status: p.isNew ? 'added' : p.isDeleted ? 'deleted' : p.isRename ? 'renamed' : 'modified',
-      untracked: res.untracked, binary: p.binary, hunks: p.hunks,
+      untracked: res.untracked, binary: p.binary, sinceReview, hunks: p.hunks,
     };
   }
 

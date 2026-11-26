@@ -16,7 +16,7 @@ export interface Settings { viewMode: ViewMode; scope: Scope; contextLines: numb
 export interface Ghost { type: 'add' | 'del'; text: string }
 export interface DiffLine { type: 'ctx' | 'add' | 'del'; oldNumber: number | null; newNumber: number | null; text: string; noEol?: boolean; isNew?: boolean; removedBefore?: Ghost[]; removedAfter?: Ghost[] }
 export interface Hunk { header: string; oldStart: number; newStart: number; lines: DiffLine[] }
-export interface FileDiff { path: string; oldPath: string | null; status: FileStatus; untracked: boolean; binary: boolean; hunks: Hunk[] }
+export interface FileDiff { path: string; oldPath: string | null; status: FileStatus; untracked: boolean; binary: boolean; sinceReview?: boolean; hunks: Hunk[] }
 
 export interface Reply { id: string; body: string; author: string; createdAt: string; updatedAt: string }
 export interface Discussion {

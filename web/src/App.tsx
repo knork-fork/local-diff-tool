@@ -51,6 +51,7 @@ function RepoPage({ id }: { id: string }) {
   const [filter, setFilter] = useState<ReviewFilter>('all');
   const [query, setQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
+  const [sinceOnly, setSinceOnly] = useState(false); // never persisted: full diff on refresh and on file switch
   const [dialog, setDialog] = useState<null | 'settings' | 'discussions'>(null);
   const [busy, setBusy] = useState(false);
 
@@ -93,6 +94,7 @@ function RepoPage({ id }: { id: string }) {
   // Large diffs (> BIG_DIFF changed lines) need a per-file confirmation before rendering.
   const BIG_DIFF = 500;
   const [confirmedBig, setConfirmedBig] = useState(false);
+  useEffect(() => setSinceOnly(false), [scope, current?.path]);
   useEffect(() => setConfirmedBig(false), [scope, current?.path]); // never remembered: re-ask whenever a file is (re)selected
   const needsConfirm = !!current && current.additions + current.deletions > BIG_DIFF && !confirmedBig;
   useEffect(() => {
@@ -225,6 +227,9 @@ function RepoPage({ id }: { id: string }) {
                   <span className={`status s-${current.status}`}>{current.status}</span>
                   <strong>{current.oldPath ? `${current.oldPath} → ${current.path}` : current.path}</strong>
                   <span className="muted"><span className="add">+{current.additions}</span> <span className="del">−{current.deletions}</span></span>
+                  {diff?.sinceReview && (
+                    <button className={`btn small${sinceOnly ? ' on' : ''}`} onClick={() => setSinceOnly(!sinceOnly)} title={sinceOnly ? 'Back to the full diff of this file' : 'Show only what changed since this file was marked reviewed'}>{sinceOnly ? 'Full diff' : 'Changes since review'}</button>
+                  )}
                 </div>
                 <div className="row gap">
                   <button className="btn small" onClick={() => goto(-1)} title="Previous file (K)">← Prev</button>
@@ -243,7 +248,7 @@ function RepoPage({ id }: { id: string }) {
               )}
               {diffErr && <div className="error pad">{diffErr}</div>}
               {!needsConfirm && !diff && !diffErr && <div className="muted pad">Loading diff…</div>}
-              {diff && <DiffView diff={diff} discussions={fileDiscussions} viewMode={settings.viewMode} contextLines={settings.contextLines} showAll={showAll} actions={actions} />}
+              {diff && <DiffView diff={diff} discussions={fileDiscussions} viewMode={settings.viewMode} contextLines={settings.contextLines} showAll={showAll} sinceOnly={sinceOnly && !!diff.sinceReview} actions={actions} />}
             </>
           )}
         </main>
