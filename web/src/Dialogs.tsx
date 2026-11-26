@@ -51,7 +51,7 @@ export function DiscussionsDialog({ discussions, actions, onOpenFile, onClearAll
       {files.map((f) => (
         <div key={f} className="disc-file">
           <div className="row gap"><strong>{f}</strong><button className="link" onClick={() => { onOpenFile(f); onClose(); }}>Open file</button></div>
-          {list.filter((d) => d.path === f).map((d) => <Thread key={d.id} d={d} actions={actions} />)}
+          {list.filter((d) => d.path === f).map((d) => <Thread key={d.id} d={d} actions={actions} hideOutdatedBadge />)}
         </div>
       ))}
     </Modal>

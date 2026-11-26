@@ -58,7 +58,7 @@ export function CommentForm({ initial = '', submitLabel, onSubmit, onCancel, aut
   );
 }
 
-export function Thread({ d, actions, showPath }: { d: Discussion; actions: Actions; showPath?: boolean }) {
+export function Thread({ d, actions, showPath, hideOutdatedBadge }: { d: Discussion; actions: Actions; showPath?: boolean; hideOutdatedBadge?: boolean }) {
   const [editing, setEditing] = useState<string | null>(null); // 'root' or reply id
   const [replying, setReplying] = useState(false);
   const [collapsed, setCollapsed] = useState(d.resolved);
@@ -68,10 +68,10 @@ export function Thread({ d, actions, showPath }: { d: Discussion; actions: Actio
   const lines = d.startLine === d.endLine ? `line ${d.startLine}` : `lines ${d.startLine}–${d.endLine}`;
   return (
     <div id={`discussion-${d.id}`} className={`thread${d.resolved ? ' resolved' : ''}${d.outdated ? ' outdated' : ''}`}>
-      {(showPath || d.outdated || d.resolved) && <div className="thread-head">
+      {(showPath || (d.outdated && !hideOutdatedBadge) || d.resolved) && <div className="thread-head">
         {showPath && <span className="thread-path">{d.path}</span>}
         {showPath && <span className="muted">{lines}</span>}
-        {d.outdated && <span className="badge warn" title="The commented code changed or was removed">Outdated</span>}
+        {d.outdated && !hideOutdatedBadge && <span className="badge warn" title="The commented code changed or was removed">Outdated</span>}
         {d.resolved && <span className="badge ok">Resolved</span>}
         {d.resolved && <button className="btn small spacer-left" onClick={() => setCollapsed(!collapsed)}>{collapsed ? 'Expand' : 'Collapse'}</button>}
       </div>}
