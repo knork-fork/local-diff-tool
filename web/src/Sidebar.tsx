@@ -39,8 +39,8 @@ export function flatten(files: FileEntry[]): FileEntry[] {
 export type ReviewFilter = 'all' | 'unreviewed' | 'reviewed';
 const STATUS = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' } as const;
 
-export function Sidebar({ files, selected, onSelect, filter, setFilter, query, setQuery }: {
-  files: FileEntry[]; selected: string | null; onSelect(f: FileEntry): void;
+export function Sidebar({ files, selected, onSelect, onToggleReviewed, filter, setFilter, query, setQuery }: {
+  files: FileEntry[]; selected: string | null; onSelect(f: FileEntry): void; onToggleReviewed(f: FileEntry): void;
   filter: ReviewFilter; setFilter(f: ReviewFilter): void; query: string; setQuery(q: string): void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -57,7 +57,7 @@ export function Sidebar({ files, selected, onSelect, filter, setFilter, query, s
           <span className="fname">{n.name}</span>
           {f.unresolvedCount > 0 && <span className="badge warn" title="Unresolved discussions">{f.unresolvedCount}</span>}
           <span className="counts"><span className="add">+{f.additions}</span> <span className="del">−{f.deletions}</span></span>
-          <span className={`check${f.reviewed ? ' on' : ''}`} title={f.reviewed ? 'Reviewed' : 'Not reviewed'}>{f.reviewed ? '✓' : '○'}</span>
+          <span className={`check${f.reviewed ? ' on' : ''}`} role="button" title={f.reviewed ? 'Reviewed (click to unreview)' : 'Not reviewed (click to mark reviewed)'} onClick={(e) => { e.stopPropagation(); onToggleReviewed(f); }}>{f.reviewed ? '✓' : '○'}</span>
         </div>
       );
     }

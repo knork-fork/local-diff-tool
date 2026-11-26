@@ -125,6 +125,9 @@ function RepoPage({ id }: { id: string }) {
 
   const toggleReviewed = (f: FileEntry) => guarded(async () => setData(await api.setReviewed(scope, f.path, !f.reviewed)));
 
+  const allReviewed = !!data && data.files.length > 0 && data.files.every((f) => f.reviewed);
+  const toggleAllReviewed = () => guarded(async () => setData(await api.setAllReviewed(scope, !allReviewed)));
+
   const goto = (delta: number) => {
     if (ordered.length === 0) return;
     const i = ordered.findIndex((f) => f.path === selected);
@@ -211,7 +214,7 @@ function RepoPage({ id }: { id: string }) {
         {notice && <div className="notice" onClick={() => setNotice('')}>{notice} <span className="muted">(click to dismiss)</span></div>}
       </header>
       <div className="body">
-        <Sidebar files={visible} selected={selected} onSelect={(f) => select(f.path)} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} />
+        <Sidebar files={visible} selected={selected} onSelect={(f) => select(f.path)} onToggleReviewed={toggleReviewed} filter={filter} setFilter={setFilter} query={query} setQuery={setQuery} />
         <main className="main">
           {!current ? (
             <div className="empty">{t.files === 0 ? 'No changes in this scope.' : 'Select a file from the sidebar to review its diff. (j / k to move between files, space to review)'}</div>
@@ -229,6 +232,7 @@ function RepoPage({ id }: { id: string }) {
                   <button className="btn small" onClick={() => nextUnreviewed()}>Next unreviewed ⇥</button>
                   <button className={`btn small${showAll ? ' on' : ''}`} onClick={() => setShowAll(!showAll)}>{showAll ? 'Collapse unchanged' : 'Show full file'}</button>
                   <label className="reviewed-toggle" title="Space"><input type="checkbox" checked={current.reviewed} onChange={() => toggleReviewed(current)} /> {current.reviewed ? 'Unreview' : 'Review'}</label>
+                  <button className="btn small" onClick={toggleAllReviewed} title="Applies to all files in this scope">{allReviewed ? 'Unreview all' : 'Review all'}</button>
                 </div>
               </div>
               {needsConfirm && current && (

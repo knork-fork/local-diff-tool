@@ -75,6 +75,10 @@ export function buildApp(opts: { webDir?: string } = {}): FastifyInstance {
     const r = await getRepo(req.params.id);
     return r.setReviewed(await r.resolveScope(req.body?.scope), req.body?.path, !!req.body?.reviewed);
   });
+  app.put<{ Params: P; Body: Record<string, any> }>(`${R}/files/reviewed-all`, async (req) => {
+    const r = await getRepo(req.params.id);
+    return r.setAllReviewed(await r.resolveScope(req.body?.scope), !!req.body?.reviewed);
+  });
   app.get<{ Params: P }>(`${R}/settings`, async (req) => (await getRepo(req.params.id)).settings());
   app.patch<{ Params: P; Body: Record<string, any> }>(`${R}/settings`, async (req) => (await getRepo(req.params.id)).settings(req.body ?? {}));
 

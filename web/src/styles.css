@@ -59,7 +59,7 @@ textarea { width: 100%; min-height: 80px; resize: vertical; } textarea.full { ma
 .tree-dir { color: var(--muted); } .tree-dir:hover, .tree-file:hover { background: var(--bg-3); }
 .tree-file.selected { background: color-mix(in srgb, var(--accent) 18%, transparent); box-shadow: inset 3px 0 var(--accent); }
 .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; } .counts { font-size: 11px; } .caret { display: inline-block; width: 10px; }
-.check { color: var(--muted); } .check.on { color: var(--ok); font-weight: bold; }
+.check { color: var(--muted); cursor: pointer; padding: 0 4px; } .check:hover { color: var(--text, inherit); } .check.on { color: var(--ok); font-weight: bold; }
 .status { font: 600 10px var(--code); padding: 0 4px; border-radius: 3px; background: var(--bg-3); text-transform: uppercase; }
 .s-added { color: var(--add-fg); } .s-deleted { color: var(--del-fg); } .s-renamed { color: var(--accent); } .s-modified { color: var(--warn); }
 .badge { font-size: 11px; padding: 0 6px; border-radius: 9px; background: var(--bg-3); color: var(--muted); }

@@ -28,6 +28,7 @@ export const makeApi = (id: string) => {
     files: (scope: Scope) => req<FilesResult>('GET', `${b}/files?scope=${scope}`),
     refresh: (scope: Scope) => req<FilesResult>('POST', `${b}/refresh`, { scope }),
     diff: (scope: Scope, path: string, oldPath: string | null) => req<FileDiff>('GET', `${b}/diff?${q({ scope, path, oldPath: oldPath ?? undefined })}`),
+    setAllReviewed: (scope: Scope, reviewed: boolean) => req<FilesResult>('PUT', `${b}/files/reviewed-all`, { scope, reviewed }),
     setReviewed: (scope: Scope, path: string, reviewed: boolean) => req<FilesResult>('PUT', `${b}/files/reviewed`, { scope, path, reviewed }),
     discussions: () => req<{ discussions: Discussion[] }>('GET', `${b}/discussions`).then((r) => r.discussions),
     create: (scope: Scope, path: string, side: string, startLine: number, endLine: number, body: string) =>

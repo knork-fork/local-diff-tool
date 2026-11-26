@@ -158,6 +158,20 @@ export class Repo {
     return this.files(scope);
   }
 
+  async setAllReviewed(scope: Scope, reviewed: boolean) {
+    const { branch } = await repoInfo(this.root);
+    const files = await listChanges(this.root, scope);
+    await (await this.store()).mutate((d) => {
+      const key = scopeKey(branch, scope);
+      d.reviewedFiles[key] ??= {};
+      for (const f of files) {
+        if (reviewed) d.reviewedFiles[key][f.path] = { fingerprint: f.fingerprint, reviewedAt: now() };
+        else delete d.reviewedFiles[key][f.path];
+      }
+    });
+    return this.files(scope);
+  }
+
   async settings(patch?: Partial<Settings>) {
     const store = await this.store();
     if (!patch) return (await store.read()).settings;

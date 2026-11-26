@@ -65,6 +65,11 @@ describe('api', () => {
     await app.inject({ method: 'PUT', url: `${base}/files/reviewed`, headers: H, payload: { path: 'a.txt', reviewed: true } });
     files = (await app.inject({ url: `${base}/files`, headers: H })).json();
     expect(files.totals.reviewed).toBe(1);
+    const all = (await app.inject({ method: 'PUT', url: `${base}/files/reviewed-all`, headers: H, payload: { reviewed: true } })).json();
+    expect(all.totals.reviewed).toBe(all.totals.files);
+    const none = (await app.inject({ method: 'PUT', url: `${base}/files/reviewed-all`, headers: H, payload: { reviewed: false } })).json();
+    expect(none.totals.reviewed).toBe(0);
+    await app.inject({ method: 'PUT', url: `${base}/files/reviewed`, headers: H, payload: { path: 'a.txt', reviewed: true } });
     expect(files.totals.unresolvedDiscussions).toBe(1);
 
     // modify file: reviewed invalidated, comment relocated
