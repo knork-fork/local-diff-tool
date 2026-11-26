@@ -95,28 +95,17 @@ export class Repo {
   async files(scope: Scope) {
     const [{ branch }, files, data] = await Promise.all([repoInfo(this.root), listChanges(this.root, scope), this.store().then((s) => s.read())]);
     const stale = await this.modifiedSinceReview(data.reviewedFiles[scopeKey(branch, scope)] ?? {});
-    await this.syncCache(scope, files);
+    await this.pruneCache(scope, files);
     return this.decorate(data, branch, scope, files, stale);
   }
 
-  /**
-   * Caches the whole current diff: every listed file without a baseline gets one (first sight), and baselines of
-   * files that are no longer in the diff are dropped. Existing baselines are only replaced on mark-reviewed.
-   */
-  private async syncCache(scope: Scope, files: ChangedFile[]) {
+  /** Drops baselines of files that are no longer in the fresh git diff. Baselines are only written on mark-reviewed. */
+  private async pruneCache(scope: Scope, files: ChangedFile[]) {
     const { branch } = await repoInfo(this.root);
     const key = scopeKey(branch, scope);
     const store = await this.store();
-    const cached = new Set(await store.cachedPaths(key));
     const present = new Set(files.map((f) => f.path));
-    const missing = files.filter((f) => !cached.has(f.path));
-    for (const p of cached) if (!present.has(p)) await store.deletePatch(key, p);
-    for (let i = 0; i < missing.length; i += 8) {
-      await Promise.all(missing.slice(i, i + 8).map(async (f) => {
-        const r = await filePatch(this.root, scope, f.path, f.oldPath);
-        if (r) await store.writePatch(key, f.path, r.patch);
-      }));
-    }
+    for (const p of await store.cachedPaths(key)) if (!present.has(p)) await store.deletePatch(key, p);
   }
 
   async diff(scope: Scope, rel: string, oldPath: string | null) {
@@ -139,7 +128,7 @@ export class Repo {
   async refresh(scope: Scope) {
     const { branch } = await repoInfo(this.root);
     const files = await listChanges(this.root, scope);
-    await this.syncCache(scope, files);
+    await this.pruneCache(scope, files);
     const oldPathOf = new Map(files.filter((f) => f.oldPath).map((f) => [f.path, f.oldPath!]));
     const report = { invalidated: [] as string[], outdated: [] as string[], relocated: [] as string[], reopened: [] as string[] };
     const data = await (await this.store()).mutate(async (d) => {

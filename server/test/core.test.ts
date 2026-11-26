@@ -172,7 +172,7 @@ describe('diff cache / NEW markers', () => {
     const base = `/api/repositories/${id}`;
     const diff = async () => (await app.inject({ url: `${base}/diff?path=a.txt`, headers: H })).json();
     const newTexts = (d: any) => d.hunks.flatMap((h: any) => h.lines).filter((l: any) => l.isNew).map((l: any) => l.text);
-    expect(newTexts(await diff())).toEqual([]); // first view = baseline
+    expect(newTexts(await diff())).toEqual([]); // no baseline before the first review
     await app.inject({ method: 'PUT', url: `${base}/files/reviewed`, headers: H, payload: { path: 'a.txt', reviewed: true } });
     await new Promise((r) => setTimeout(r, 20));
     fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\nthree\n');
@@ -182,7 +182,7 @@ describe('diff cache / NEW markers', () => {
     fs.rmSync(path.join(dir, 'a.txt'));
     await app.inject({ url: `${base}/files`, headers: H });
     fs.writeFileSync(path.join(dir, 'a.txt'), 'x\n');
-    expect(newTexts(await diff())).toEqual([]); // old baseline was dropped, new baseline taken
+    expect(newTexts(await diff())).toEqual([]); // old baseline was dropped
   });
 });
 
