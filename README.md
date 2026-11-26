@@ -1,5 +1,9 @@
 # local-diff-tool
 
+<video src="https://github.com/user-attachments/assets/a60cd688-61eb-4f70-9968-35513f8a4ba4"
+       autoplay loop muted playsinline>
+</video>
+
 Local Review: a local-first, GitLab-MR-style code review UI for uncommitted changes in any local git repo. It runs in a single Docker container on `127.0.0.1:22222`.
 
 ## Setup
