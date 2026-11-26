@@ -99,13 +99,17 @@ export class Repo {
     return this.decorate(data, branch, scope, files, stale);
   }
 
-  /** Drops baselines of files that are no longer in the fresh git diff. Baselines are only written on mark-reviewed. */
+  /** Drops baselines and reviewed entries of files that are no longer in the fresh git diff. Baselines are only written on mark-reviewed. */
   private async pruneCache(scope: Scope, files: ChangedFile[]) {
     const { branch } = await repoInfo(this.root);
     const key = scopeKey(branch, scope);
     const store = await this.store();
     const present = new Set(files.map((f) => f.path));
     for (const p of await store.cachedPaths(key)) if (!present.has(p)) await store.deletePatch(key, p);
+    const gone = (d: ReviewData) => Object.keys(d.reviewedFiles[key] ?? {}).filter((p) => !present.has(p));
+    if (gone(await store.read()).length) {
+      await store.mutate((d) => { for (const p of gone(d)) delete d.reviewedFiles[key][p]; });
+    }
   }
 
   async diff(scope: Scope, rel: string, oldPath: string | null) {

@@ -139,6 +139,22 @@ describe('api', () => {
     expect(r.refresh.invalidated).toEqual(['a.txt']);
   });
 
+  it('drops reviewed entries from review.json once the file leaves the diff', async () => {
+    const app = buildApp(); const H = { host: 'localhost' };
+    fs.writeFileSync(path.join(dir, 'gone.txt'), 'one\n');
+    const id = (await app.inject({ method: 'POST', url: '/api/repositories/open', headers: H, payload: { path: dir } })).json().id;
+    const base = `/api/repositories/${id}`;
+    await app.inject({ method: 'PUT', url: `${base}/files/reviewed`, headers: H, payload: { path: 'gone.txt', reviewed: true } });
+    const reviewFile = () => {
+      const rd = path.join(DATA, fs.readdirSync(DATA).find((n) => n.startsWith(path.basename(dir)))!, 'branches');
+      return JSON.parse(fs.readFileSync(path.join(rd, fs.readdirSync(rd)[0], 'review.json'), 'utf8'));
+    };
+    expect(JSON.stringify(reviewFile().reviewedFiles)).toContain('gone.txt');
+    fs.rmSync(path.join(dir, 'gone.txt'));
+    await app.inject({ url: `${base}/files`, headers: H });
+    expect(JSON.stringify(reviewFile().reviewedFiles)).not.toContain('gone.txt');
+  });
+
   it('rejects foreign hosts and traversal', async () => {
     const app = buildApp();
     expect((await app.inject({ url: '/api/health', headers: { host: 'evil.com' } })).statusCode).toBe(403);
