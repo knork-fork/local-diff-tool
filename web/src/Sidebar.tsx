@@ -17,7 +17,7 @@ function build(files: FileEntry[]): TNode {
     });
   }
   const tidy = (n: TNode): TNode => {
-    n.children = n.children.map(tidy).sort((a, b) => Number(!!a.file) - Number(!!b.file) || a.name.localeCompare(b.name));
+    n.children = n.children.map(tidy).sort((a, b) => Number(!!b.file) - Number(!!a.file) || a.name.localeCompare(b.name));
     // GitLab-style compression of single-child directory chains
     while (!n.file && n.path && n.children.length === 1 && !n.children[0].file) {
       const c = n.children[0];
@@ -25,7 +25,7 @@ function build(files: FileEntry[]): TNode {
     }
     return n;
   };
-  root.children = root.children.map(tidy).sort((a, b) => Number(!!a.file) - Number(!!b.file) || a.name.localeCompare(b.name));
+  root.children = root.children.map(tidy).sort((a, b) => Number(!!b.file) - Number(!!a.file) || a.name.localeCompare(b.name));
   return root;
 }
 
