@@ -6,6 +6,7 @@ import { repoIdFor, resolveRepoRoot, rootFromId } from './paths.js';
 import { parseScope, Repo } from './repo.js';
 import { HttpError } from './types.js';
 import { GitError } from './git.js';
+import { consumeSession, endSession, getSession, signalSession, startSession } from './sessions.js';
 
 const known = new Map<string, Repo>();
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -103,6 +104,24 @@ export function buildApp(opts: { webDir?: string } = {}): FastifyInstance {
     (await getRepo(req.params.id)).updateReply(req.params.discussionId!, req.params.replyId!, req.body ?? {}));
   app.delete<{ Params: P }>(`${R}/discussions/:discussionId/replies/:replyId`, async (req) =>
     (await getRepo(req.params.id)).deleteReply(req.params.discussionId!, req.params.replyId!));
+
+  app.post<{ Params: P }>(`${R}/sessions`, async (req) => {
+    const r = await getRepo(req.params.id);
+    const { token, session } = await startSession(r.id);
+    return { token, status: session.status };
+  });
+  app.get<{ Params: { token: string } }>('/api/sessions/:token', async (req) => {
+    const s = await getSession(req.params.token);
+    return { token: req.params.token, repoId: s.repoId, status: s.status };
+  });
+  for (const status of ['feedback', 'finished'] as const) {
+    app.post<{ Params: { token: string } }>(`/api/sessions/:token/${status === 'feedback' ? 'feedback' : 'finish'}`, async (req) => {
+      const s = await signalSession(req.params.token, status);
+      return { token: req.params.token, repoId: s.repoId, status: s.status };
+    });
+  }
+  app.post<{ Params: { token: string } }>('/api/sessions/:token/end', async (req, reply) => { await endSession(req.params.token); return reply.status(204).send(); });
+  app.post<{ Params: { token: string } }>('/api/sessions/:token/consume', async (req) => ({ status: await consumeSession(req.params.token) }));
 
   const webDir = opts.webDir;
   if (webDir && fs.existsSync(webDir)) {

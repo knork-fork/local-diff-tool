@@ -29,3 +29,23 @@ case ":$PATH:" in
   *) echo "Add $BIN_DIR to your PATH, e.g.:"
      echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && source ~/.bashrc" ;;
 esac
+
+# Install the start-review agent skill (symlink) into a Claude config dir's skills folder.
+SKILL_SRC="$APP_DIR/skills/start-review"
+if [ -d "$SKILL_SRC" ]; then
+  DEFAULT_CFG="$HOME/.claude"
+  CFG=""
+  if [ -t 0 ]; then
+    read -r -p "Install the start-review skill to which directory? [$DEFAULT_CFG] " CFG || CFG=""
+  fi
+  CFG="${CFG:-$DEFAULT_CFG}"
+  CFG="${CFG/#\~/$HOME}"
+  SKILL_LINK="$CFG/skills/start-review"
+  mkdir -p "$CFG/skills"
+  if [ -L "$SKILL_LINK" ] || [ ! -e "$SKILL_LINK" ]; then
+    ln -sfn "$SKILL_SRC" "$SKILL_LINK"
+    echo "Installed skill: $SKILL_LINK -> $SKILL_SRC"
+  else
+    echo "setup: $SKILL_LINK exists and is not a symlink; skipping skill install" >&2
+  fi
+fi

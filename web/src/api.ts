@@ -43,4 +43,9 @@ export const makeApi = (id: string) => {
 };
 export type Api = ReturnType<typeof makeApi>;
 
+export type SessionStatus = 'pending' | 'feedback' | 'finished' | 'working';
+export const getSession = (token: string) => req<{ token: string; repoId: string; status: SessionStatus }>('GET', `/api/sessions/${token}`);
+export const sendFeedback = (token: string) => req<{ status: SessionStatus }>('POST', `/api/sessions/${token}/feedback`);
+export const finishSession = (token: string) => req<{ status: SessionStatus }>('POST', `/api/sessions/${token}/finish`);
+
 export const listRepos = () => req<{ repositories: RepoInfo[] }>('GET', '/api/repositories').then((r) => r.repositories);

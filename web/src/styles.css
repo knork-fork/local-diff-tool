@@ -35,6 +35,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .btn { border: 1px solid var(--border); background: var(--bg); border-radius: 6px; padding: 4px 10px; }
 .btn:hover { background: var(--bg-3); } .btn.on { background: var(--bg-3); border-color: var(--accent); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; } .btn.primary:disabled { opacity: .5; }
+.btn.finish:not(:disabled) { background: #7ec8f5; border-color: #5bb4ea; color: #0b2a3f; } .btn.finish:not(:disabled):hover { background: #9ed6f8; }
+.btn.finish.busy { cursor: progress; }
+.spinner { display: inline-block; width: 11px; height: 11px; margin-right: 6px; vertical-align: -1px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.btn.finish:disabled { opacity: .5; cursor: not-allowed; }
+.split { position: relative; display: inline-flex; }
+.split .btn.finish:first-child:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split .btn.caret { display: inline-flex; align-items: center; justify-content: center; width: 26px; padding: 0; margin-left: -1px; border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-color: rgba(0,0,0,.25); }
+.split-menu { display: none; position: absolute; top: 100%; left: 0; right: 0; padding-top: 4px; z-index: 20; }
+.split-menu .btn { display: block; width: 100%; white-space: nowrap; text-align: center; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
+.split:hover .split-menu, .split:focus-within .split-menu { display: block; }
 .btn.small { padding: 2px 8px; font-size: 12px; }
 .link { background: none; border: none; color: var(--accent); padding: 0 4px; font-size: 12px; } .link.danger { color: var(--del-fg); }
 input, select, textarea { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }

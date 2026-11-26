@@ -52,7 +52,8 @@ EOF_HELP
 command -v git >/dev/null || die "git is not installed"
 command -v curl >/dev/null || die "curl is not installed"
 
-is_cmd() { case "$1" in list-comments|list-comment|reply|clear|help|-h|--help) return 0 ;; *) return 1 ;; esac; }
+# session-start|session-status|session-wait|session-end are internal (used by skills/start-review), deliberately not in usage().
+is_cmd() { case "$1" in list-comments|list-comment|reply|clear|session-start|session-status|session-wait|session-end|help|-h|--help) return 0 ;; *) return 1 ;; esac; }
 
 target="."
 if [ $# -gt 0 ] && ! is_cmd "$1"; then
@@ -65,6 +66,8 @@ case "$cmd" in
   help|-h|--help) usage; exit 0 ;;
   list-comment) [ -n "${2:-}" ] || { echo "review: list-comment requires a <comment-id>" >&2; echo >&2; usage >&2; exit 1; } ;;
   reply) { [ -n "${2:-}" ] && [ -n "${3:-}" ] && [ $# -le 4 ]; } || { echo "review: reply requires <comment-id> and '<comment text>' (quote the text), optionally followed by [author]" >&2; echo >&2; usage >&2; exit 1; } ;;
+  session-start) ;;
+  session-status|session-wait|session-end) [ -n "${2:-}" ] || { echo "review: $cmd requires a <token>" >&2; echo >&2; usage >&2; exit 1; } ;;
   *) echo "review: unknown command: $cmd" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
 [ -z "$cmd" ] || [ "$cmd" = clear ] || command -v jq >/dev/null || die "jq is required for $cmd"
@@ -95,6 +98,51 @@ if [ "$code" != "200" ]; then
 fi
 id="$(printf '%s' "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$id" ] || die "unexpected API response: $body"
+
+open_url() {
+  echo "Opening $1"
+  if command -v xdg-open >/dev/null 2>&1; then xdg-open "$1" >/dev/null 2>&1 || echo "review: could not launch a browser; open $1 manually" >&2
+  elif command -v open >/dev/null 2>&1; then open "$1" || echo "review: could not launch a browser; open $1 manually" >&2
+  else echo "review: no browser launcher found; open $1 manually" >&2; fi
+}
+
+session_status() {
+  local out code
+  out="$(curl -sS --max-time 10 -w '\n%{http_code}' "$BASE/api/sessions/$1")" || return 2
+  code="${out##*$'\n'}"; out="${out%$'\n'*}"
+  [ "$code" = 200 ] || { echo "review: unknown session token" >&2; return 3; }
+  printf '%s\n' "$out" | sed -n 's/.*"status":"\([a-z]*\)".*/\1/p'
+}
+
+case "$cmd" in
+  session-start)
+    out="$(curl -sS --max-time 20 -X POST -w '\n%{http_code}' "$BASE/api/repositories/$id/sessions")" || die "could not reach the API at $BASE"
+    code="${out##*$'\n'}"; out="${out%$'\n'*}"
+    [ "$code" = 200 ] || die "could not start session (HTTP $code)"
+    token="$(printf '%s' "$out" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+    [ -n "$token" ] || die "unexpected API response: $out"
+    open_url "$BASE/repositories/$id?session=$token"
+    echo "Session token: $token"
+    exit 0 ;;
+  session-status)
+    session_status "$2" || exit $?
+    exit 0 ;;
+  session-end)
+    code="$(curl -sS --max-time 10 -X POST -o /dev/null -w '%{http_code}' "$BASE/api/sessions/$2/end")" || die "could not reach the API at $BASE"
+    [ "$code" = 204 ] || die "could not end session (HTTP $code)"
+    exit 0 ;;
+  session-wait)
+    while :; do
+      out="$(curl -sS --max-time 10 -X POST -w '\n%{http_code}' "$BASE/api/sessions/$2/consume" 2>/dev/null)" || { sleep 2; continue; } # app restarting: retry
+      code="${out##*$'\n'}"; out="${out%$'\n'*}"
+      [ "$code" = 404 ] && { echo "review: unknown session token" >&2; exit 3; }
+      if [ "$code" = 200 ]; then
+        st="$(printf '%s\n' "$out" | sed -n 's/.*"status":"\([a-z]*\)".*/\1/p')"
+        [ "$st" = pending ] || { echo "$st"; exit 0; }
+      fi
+      sleep 2
+    done ;;
+esac
 
 if [ "$cmd" = clear ]; then
   out="$(curl -sS --max-time 20 -X DELETE -w '\n%{http_code}' "$BASE/api/repositories/$id/comments")" || die "could not reach the API at $BASE"

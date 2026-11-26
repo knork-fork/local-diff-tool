@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ApiError, listRepos, makeApi } from './api';
+import { ApiError, type SessionStatus, finishSession, getSession, listRepos, sendFeedback, makeApi } from './api';
 import { DiffView } from './DiffView';
-import { DiscussionsDialog, SettingsDialog } from './Dialogs';
+import { DiscussionsDialog, Modal, SettingsDialog } from './Dialogs';
 import { flatten, Sidebar, type ReviewFilter } from './Sidebar';
 import type { Actions } from './Thread';
 import type { Discussion, FileDiff, FileEntry, FilesResult, RepoInfo, Scope, Settings } from './types';
@@ -30,7 +30,7 @@ function Home() {
   return (
     <div className="home">
       <h1>Local Review</h1>
-      <p>Run <code>review</code> inside a git repository to open it here.</p>
+      <p>Run <code>review</code> inside a git repository to open it here, or run <code>/start-review</code> in your coding agent (e.g. Claude Code) to review with it.</p>
       {repos?.map((r) => <p key={r.id}><a href={`/repositories/${r.id}`}>{r.name}</a> <span className="muted">{r.path}</span></p>)}
     </div>
   );
@@ -52,10 +52,69 @@ function RepoPage({ id }: { id: string }) {
   const [query, setQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [sinceOnly, setSinceOnly] = useState(false); // never persisted: full diff on refresh and on file switch
-  const [dialog, setDialog] = useState<null | 'settings' | 'discussions'>(null);
+  const [dialog, setDialog] = useState<null | 'settings' | 'discussions' | 'finish'>(null);
   const [busy, setBusy] = useState(false);
 
   const scope = settings?.scope ?? 'all';
+
+  // Review session token (from `review session-start`): kept in the URL and in sessionStorage so it survives refreshes of this tab.
+  const [session, setSession] = useState<{ token: string; status: SessionStatus } | null>(null);
+  const [ended, setEnded] = useState(false);
+  const dropSession = () => { setSession(null); try { sessionStorage.removeItem(`session:${id}`); } catch { /* ignore */ } };
+  useEffect(() => {
+    const key = `session:${id}`;
+    const u = new URL(location.href);
+    let token = u.searchParams.get('session');
+    try { if (token) sessionStorage.setItem(key, token); else token = sessionStorage.getItem(key); } catch { /* ignore */ }
+    if (!token) return;
+    getSession(token).then((r) => {
+      setSession({ token: token!, status: r.status });
+      if (!u.searchParams.has('session')) { u.searchParams.set('session', token!); history.replaceState(null, '', u); }
+    }).catch(() => { try { sessionStorage.removeItem(key); } catch { /* ignore */ } });
+  }, [id]);
+  // Poll so the buttons go inert while the agent works, and disable when the token disappears (review ended elsewhere).
+  const token = session?.token;
+  useEffect(() => {
+    if (!token) return;
+    const t = setInterval(() => {
+      getSession(token).then((r) => setSession((c) => (c && c.token === token ? { ...c, status: r.status } : c)))
+        .catch((e) => { if (e instanceof ApiError && /session/i.test(e.message)) dropSession(); });
+    }, 2000);
+    return () => clearInterval(t);
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+  const idle = session?.status === 'pending';
+  const agentBusy = !!session && !idle; // spinner, not disabled
+  const signal = async (kind: 'feedback' | 'finish') => {
+    if (!session) return;
+    setDialog(null);
+    try {
+      if (kind === 'feedback') {
+        await sendFeedback(session.token);
+        setSession({ ...session, status: 'feedback' });
+        setNotice('Feedback sent. Your coding agent will address the comments and keep listening for more feedback.');
+      } else {
+        await finishSession(session.token);
+        dropSession(); setEnded(true);
+        window.close(); // only works for script-opened tabs; otherwise the "review finished" screen below stays
+      }
+    } catch (e: any) {
+      if (e instanceof ApiError && /session/i.test(e.message)) dropSession();
+      setNotice(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+
+  // Ctrl+Enter = Send feedback, except while typing (there it saves the comment/reply) or with a dialog open.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || !e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const el = e.target as HTMLElement;
+      if (/INPUT|TEXTAREA|SELECT/.test(el.tagName) || el.isContentEditable || dialog || !idle) return;
+      e.preventDefault();
+      signal('feedback');
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  });
 
   const loadFiles = useCallback(async (s: Scope) => {
     const [f, d] = await Promise.all([api.files(s), api.discussions()]);
@@ -111,6 +170,27 @@ function RepoPage({ id }: { id: string }) {
     setBusy(true);
     try { await fn(); } catch (e: any) { setNotice(e.message); } finally { setBusy(false); }
   };
+
+  // Poll only the review file's comments, and only to update threads already on the page (e.g. agent replies): never add
+  // or remove threads, and never touch the diff, file list or reviewed state.
+  useEffect(() => {
+    const t = setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const fresh = new Map((await api.discussions()).map((d) => [d.id, d]));
+        setDiscussions((cur) => {
+          let changed = false;
+          const next = cur.map((d) => {
+            const f = fresh.get(d.id);
+            if (!f || JSON.stringify(f) === JSON.stringify(d)) return d;
+            changed = true; return f;
+          });
+          return changed ? next : cur;
+        });
+      } catch { /* transient; next tick retries */ }
+    }, 4000);
+    return () => clearInterval(t);
+  }, [api]);
 
   const refresh = () => guarded(async () => {
     const r = await api.refresh(scope);
@@ -184,6 +264,7 @@ function RepoPage({ id }: { id: string }) {
   // Discussions dialog can act on any file's discussion, so it uses path-agnostic actions.
   const globalActions: Actions = useMemo(() => ({ ...actions, create: async () => {} }), [actions]);
 
+  if (ended) return <div className="home"><h2>Review finished</h2><p>You can close this tab. Run <code>/start-review</code> in your coding agent to review again.</p></div>;
   if (error) return <div className="home"><h2>Cannot open repository</h2><p className="error">{error}</p><p>Run <code>review</code> in the repository again.</p></div>;
   if (!data || !info || !settings) return <div className="home muted">Loading…</div>;
 
@@ -211,6 +292,13 @@ function RepoPage({ id }: { id: string }) {
           </div>
           <button className="btn" disabled={busy} onClick={refresh}>↻ Refresh</button>
           <button className="btn" onClick={() => setDialog('discussions')}>Discussions ({t.totalDiscussions})</button>
+          <span className={`split${session ? '' : ' disabled'}`} title={!session ? '/start-review with coding agent (e.g. claude code) to enable this feature' : agentBusy ? 'Your coding agent is busy with the previous round' : undefined}>
+            <button className={`btn finish${agentBusy ? ' busy' : ''}`} disabled={!session} aria-busy={agentBusy} onClick={() => { if (idle) setDialog('finish'); }}>
+              {agentBusy && <span className="spinner" aria-hidden />}Finish review
+            </button>
+            {!agentBusy && <button className="btn finish caret" disabled={!session} aria-label="More review actions"><svg width="10" height="6" viewBox="0 0 10 6" aria-hidden><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg></button>}
+            {idle && <div className="split-menu"><button className="btn finish" title="Send feedback (Ctrl+Enter)" onClick={() => signal('feedback')}>Send feedback</button></div>}
+          </span>
           <button className="btn" onClick={() => setDialog('settings')} title="Settings">⚙</button>
         </div>
         {notice && <div className="notice" onClick={() => setNotice('')}>{notice} <span className="muted">(click to dismiss)</span></div>}
@@ -253,6 +341,16 @@ function RepoPage({ id }: { id: string }) {
           )}
         </main>
       </div>
+      {dialog === 'finish' && (
+        <Modal title="Finish review?" onClose={() => setDialog(null)}>
+          <p>Finishing the review ends the conversation with your coding agent about it, and this tab will close. To review again you will need to run <code>/start-review</code> again.</p>
+          <p>If you want the agent to address your comments and keep talking, send feedback instead.</p>
+          <div className="row gap" style={{ justifyContent: 'space-between' }}>
+            <button className="btn" onClick={() => signal('feedback')}>Send feedback</button>
+            <button className="btn finish" onClick={() => signal('finish')}>Finish review</button>
+          </div>
+        </Modal>
+      )}
       {dialog === 'settings' && <SettingsDialog theme={theme} setTheme={setTheme} contextLines={settings.contextLines} setContextLines={(n) => patchSettings({ contextLines: n })} onClose={() => setDialog(null)} />}
       {dialog === 'discussions' && <DiscussionsDialog discussions={discussions} actions={globalActions} onOpenFile={(p) => select(p)} onClearAll={() => guarded(async () => { await api.clearAll(); await reload(); })} onClose={() => setDialog(null)} />}
     </div>

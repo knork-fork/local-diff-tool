@@ -215,3 +215,36 @@ describe('markNewLines', () => {
     expect(ls[1].removedBefore).toEqual([{ type: 'add', text: 'b' }]);
   });
 });
+
+describe('sessions', () => {
+  it('reuses the token; clicks are inert while the agent works; end clears it', async () => {
+    const app = buildApp();
+    const H = { host: 'localhost:22222' };
+    const post = async (url: string) => (await app.inject({ method: 'POST', url, headers: H })).json();
+    const status = async (t: string) => (await app.inject({ url: `/api/sessions/${t}`, headers: H })).json().status;
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
+    const id = (await app.inject({ method: 'POST', url: '/api/repositories/open', headers: H, payload: { path: dir } })).json().id;
+    const a = await post(`/api/repositories/${id}/sessions`);
+    expect((await post(`/api/repositories/${id}/sessions`)).token).toBe(a.token);
+    expect((await post(`/api/sessions/${a.token}/consume`)).status).toBe('pending');
+    expect((await post(`/api/sessions/${a.token}/feedback`)).status).toBe('feedback');
+    expect(await status(a.token)).toBe('feedback');
+    expect((await post(`/api/sessions/${a.token}/consume`)).status).toBe('feedback'); // agent picks it up
+    expect(await status(a.token)).toBe('working');
+    expect((await app.inject({ method: 'POST', url: `/api/sessions/${a.token}/feedback`, headers: H })).statusCode).toBe(409);
+    expect((await app.inject({ method: 'POST', url: `/api/sessions/${a.token}/finish`, headers: H })).statusCode).toBe(409);
+    expect((await post(`/api/sessions/${a.token}/consume`)).status).toBe('pending'); // agent waits again
+    expect(await status(a.token)).toBe('pending');
+    await post(`/api/sessions/${a.token}/finish`);
+    expect((await post(`/api/sessions/${a.token}/consume`)).status).toBe('finished');
+    expect(await status(a.token)).toBe('working');
+    expect((await post(`/api/sessions/${a.token}/consume`)).status).toBe('finished'); // still closing, never re-armed
+    expect((await app.inject({ method: 'POST', url: `/api/sessions/${a.token}/end`, headers: H })).statusCode).toBe(204);
+    expect((await app.inject({ url: `/api/sessions/${a.token}`, headers: H })).statusCode).toBe(404);
+    const b = await post(`/api/repositories/${id}/sessions`);
+    expect(b.token).not.toBe(a.token);
+    await post(`/api/sessions/${b.token}/feedback`); await post(`/api/sessions/${b.token}/consume`); // agent dies while working
+    expect((await post(`/api/repositories/${id}/sessions`)).token).toBe(b.token);
+    expect(await status(b.token)).toBe('pending'); // /start-review recovers it
+  });
+});
